@@ -23,8 +23,10 @@ class BleService {
   static const String audioMetadataUuid =
       '7b100005-5a1a-4d3e-9c2f-6b8e0d100001';
 
+  // Device -> phone: transfer messages and binary packets.
   static const String fileTransferUuid = '7b100006-5a1a-4d3e-9c2f-6b8e0d100001';
 
+  // Phone -> device: GET, RESUME, ACK, LIST and other commands.
   static const String transferCommandUuid =
       '7b100007-5a1a-4d3e-9c2f-6b8e0d100001';
 

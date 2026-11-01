@@ -1,17 +1,19 @@
 class ApiConfig {
-  static const String baseUrl = 'http://172.16.2.14:8000';
+  // Production Django API hosted on Render
+  static const String baseUrl = 'https://salamasphere-api.onrender.com';
 
   static const String loginEndpoint = '/api/accounts/login/';
+  static const String currentUserEndpoint = '/api/accounts/me/';
   static const String registerEndpoint = '/api/accounts/register/';
   static const String incidentsEndpoint = '/api/incidents/';
-  static const String trustedContactsEndpoint =
-      '/api/notifications/trusted-contacts/';
+  static const String trustedContactsEndpoint = '/api/trusted-contacts/';
   static const String notificationDeliveriesEndpoint =
       '/api/notifications/deliveries/';
   static const String verificationDocumentsEndpoint =
       '/api/accounts/verification-documents/';
+  static const String evidenceVaultEndpoint = '/api/evidence-vault/';
+  static const String privateMediaEndpoint = '/api/accounts/private-media/';
 
-  // Keep your other existing endpoint definitions unchanged.
   static const String adminVerificationDocumentsEndpoint =
       '/api/accounts/admin/verification-documents/';
 
@@ -29,6 +31,12 @@ class ApiConfig {
 
   static String incidentNotificationEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/notifications/';
+
+  static String incidentFollowUpNotesEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/notes/';
+
+  static String incidentAuditEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/audit/';
 
   static const String authorityApplicationsEndpoint =
       '/api/accounts/authority-applications/';

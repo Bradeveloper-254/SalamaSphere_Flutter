@@ -46,3 +46,39 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Android signing credentials
+*.jks
+*.keystore
+key.properties
+
+# Sensitive application data
+private_media/
+evidence/
+uploads/
+recordings/
+*.wav
+*.mp3
+*.m4a
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Flutter generated files
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+coverage/
+
+# SalamaSphere Android signing credentials
+android/key.properties
+*.jks
+*.keystore

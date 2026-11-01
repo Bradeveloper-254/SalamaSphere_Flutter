@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -6,18 +5,13 @@ import '../services/api_service.dart';
 class ResetPasswordScreen extends StatefulWidget {
   final ApiService apiService;
 
-  const ResetPasswordScreen({
-    super.key,
-    required this.apiService,
-  });
+  const ResetPasswordScreen({super.key, required this.apiService});
 
   @override
-  State<ResetPasswordScreen> createState() =>
-      _ResetPasswordScreenState();
+  State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
 }
 
-class _ResetPasswordScreenState
-    extends State<ResetPasswordScreen> {
+class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
 
   final uidController = TextEditingController();
@@ -67,9 +61,7 @@ class _ResetPasswordScreenState
       passwordController.clear();
       confirmPasswordController.clear();
 
-      await Future<void>.delayed(
-        const Duration(milliseconds: 900),
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 900));
 
       if (!mounted) return;
 
@@ -99,19 +91,12 @@ class _ResetPasswordScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.password,
-                    size: 72,
-                    color: primaryColor,
-                  ),
+                  const Icon(Icons.password, size: 72, color: primaryColor),
                   const SizedBox(height: 20),
                   const Text(
                     'Create a new password',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
                   const Text(

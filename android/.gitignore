@@ -12,3 +12,8 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# SalamaSphere Android signing credentials
+android/key.properties
+*.jks
+*.keystore

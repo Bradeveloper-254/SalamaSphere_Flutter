@@ -17,9 +17,7 @@ class AuthorityVerificationDocument {
     required this.submittedAt,
   });
 
-  factory AuthorityVerificationDocument.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory AuthorityVerificationDocument.fromJson(Map<String, dynamic> json) {
     return AuthorityVerificationDocument(
       id: _readInt(json['id'], 'id'),
       authorityId: _readInt(json['authority_id'], 'authority_id'),
@@ -28,8 +26,7 @@ class AuthorityVerificationDocument {
       documentType: json['document_type']?.toString() ?? 'other',
       reviewStatus: json['review_status']?.toString() ?? 'pending',
       submittedAt: DateTime.parse(
-        json['submitted_at']?.toString() ??
-            DateTime.now().toIso8601String(),
+        json['submitted_at']?.toString() ?? DateTime.now().toIso8601String(),
       ),
     );
   }

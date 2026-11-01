@@ -22,8 +22,7 @@ class BackendTestScreen extends StatefulWidget {
   const BackendTestScreen({super.key});
 
   @override
-  State<BackendTestScreen> createState() =>
-      _BackendTestScreenState();
+  State<BackendTestScreen> createState() => _BackendTestScreenState();
 }
 
 class _BackendTestScreenState extends State<BackendTestScreen> {
@@ -54,7 +53,8 @@ class _BackendTestScreenState extends State<BackendTestScreen> {
       loading = false;
       loggedIn = response['success'] == true;
 
-      result = '''
+      result =
+          '''
 ${response['message']}
 HTTP status: ${response['status_code'] ?? 'Unavailable'}
 ''';
@@ -74,7 +74,8 @@ HTTP status: ${response['status_code'] ?? 'Unavailable'}
     setState(() {
       loading = false;
 
-      result = '''
+      result =
+          '''
 ${response['message']}
 HTTP status: ${response['status_code'] ?? 'Unavailable'}
 
@@ -105,9 +106,7 @@ ${response['data'] ?? ''}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('SalamaSphere Backend Test'),
-      ),
+      appBar: AppBar(title: const Text('SalamaSphere Backend Test')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -116,18 +115,12 @@ ${response['data'] ?? ''}
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.security,
-                  size: 64,
-                ),
+                const Icon(Icons.security, size: 64),
                 const SizedBox(height: 16),
                 const Text(
                   'Connect to SalamaSphere Django',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 24),
 
@@ -156,9 +149,7 @@ ${response['data'] ?? ''}
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: loading ? null : login,
-                    child: Text(
-                      loading ? 'Connecting...' : 'Log in',
-                    ),
+                    child: Text(loading ? 'Connecting...' : 'Log in'),
                   ),
                 ] else ...[
                   FilledButton.icon(
@@ -176,9 +167,7 @@ ${response['data'] ?? ''}
                 const SizedBox(height: 24),
                 const Text(
                   'Connection result',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 SelectableText(result),

@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
@@ -7,18 +6,13 @@ import 'reset_password_screen.dart';
 class ForgotPasswordScreen extends StatefulWidget {
   final ApiService apiService;
 
-  const ForgotPasswordScreen({
-    super.key,
-    required this.apiService,
-  });
+  const ForgotPasswordScreen({super.key, required this.apiService});
 
   @override
-  State<ForgotPasswordScreen> createState() =>
-      _ForgotPasswordScreenState();
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
-class _ForgotPasswordScreenState
-    extends State<ForgotPasswordScreen> {
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
 
@@ -55,17 +49,13 @@ class _ForgotPasswordScreenState
     if (result['success'] == true) {
       // Continue to the page where the user enters the
       // UID and token from the development email.
-      await Future<void>.delayed(
-        const Duration(milliseconds: 700),
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 700));
 
       if (!mounted) return;
 
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ResetPasswordScreen(
-            apiService: widget.apiService,
-          ),
+          builder: (_) => ResetPasswordScreen(apiService: widget.apiService),
         ),
       );
     }
@@ -95,19 +85,12 @@ class _ForgotPasswordScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.lock_reset,
-                    size: 72,
-                    color: primaryColor,
-                  ),
+                  const Icon(Icons.lock_reset, size: 72, color: primaryColor),
                   const SizedBox(height: 20),
                   const Text(
                     'Recover your account',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 25,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
                   const Text(
@@ -132,9 +115,8 @@ class _ForgotPasswordScreenState
                         return 'Please enter your email address.';
                       }
 
-                      if (!RegExp(
-                        r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                      ).hasMatch(email)) {
+                      if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                          .hasMatch(email)) {
                         return 'Enter a valid email address.';
                       }
 

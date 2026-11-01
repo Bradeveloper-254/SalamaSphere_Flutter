@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../admin_account_management_screen.dart';
 import '../admin_verification_screen.dart';
+import '../incident_dashboard_screen.dart';
 import '../login_screen.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
@@ -31,6 +32,18 @@ class AdminDashboardScreen extends StatelessWidget {
     );
   }
 
+  void _openIncidentDashboard(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => IncidentDashboardScreen(
+          apiService: apiService,
+          username: username,
+          role: 'admin',
+        ),
+      ),
+    );
+  }
+
   void _logout(BuildContext context) {
     apiService.logout();
 
@@ -42,7 +55,9 @@ class AdminDashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF176B5B);
+    const primaryColor = Color(0xFF102A43);
+    const teal = Color(0xFF087F8C);
+    const coral = Color(0xFFE76F51);
 
     return Scaffold(
       appBar: AppBar(
@@ -102,6 +117,38 @@ class AdminDashboardScreen extends StatelessWidget {
                 ),
               ),
 
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _AdminMetric(
+                      icon: Icons.health_and_safety_outlined,
+                      value: 'Healthy',
+                      label: 'System',
+                      color: teal,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _AdminMetric(
+                      icon: Icons.people_alt_outlined,
+                      value: 'Users',
+                      label: 'Statistics',
+                      color: primaryColor,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _AdminMetric(
+                      icon: Icons.sync,
+                      value: 'Queue',
+                      label: 'Sync',
+                      color: coral,
+                    ),
+                  ),
+                ],
+              ),
+
               const SizedBox(height: 28),
 
               const Text(
@@ -110,6 +157,15 @@ class AdminDashboardScreen extends StatelessWidget {
               ),
 
               const SizedBox(height: 16),
+
+              _AdminActionCard(
+                icon: Icons.dashboard_outlined,
+                title: 'Incident Dashboard',
+                description: 'Review incident metrics, evidence integrity, notifications, and audit activity.',
+                onTap: () => _openIncidentDashboard(context),
+              ),
+
+              const SizedBox(height: 12),
 
               _AdminActionCard(
                 icon: Icons.verified_user_outlined,
@@ -161,6 +217,88 @@ class AdminDashboardScreen extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: Colors.white,
+        indicatorColor: teal.withValues(alpha: 0.16),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard, color: teal),
+            label: 'Overview',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.admin_panel_settings_outlined),
+            selectedIcon: Icon(Icons.admin_panel_settings, color: primaryColor),
+            label: 'Admin',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.devices_other_outlined),
+            selectedIcon: Icon(Icons.devices, color: teal),
+            label: 'Devices',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings, color: coral),
+            label: 'Settings',
+          ),
+        ],
+        onDestinationSelected: (index) {
+          if (index == 1) {
+            _openAccountManagement(context);
+          } else if (index == 2) {
+            _showAdminMessage(
+              context,
+              'Device management is available from system monitoring.',
+            );
+          } else if (index == 3) {
+            _showAdminMessage(
+              context,
+              'Settings include role permissions, audit logs and privacy controls.',
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void _showAdminMessage(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+class _AdminMetric extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  const _AdminMetric({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: color.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+        child: Column(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
+            ),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
         ),
       ),
     );

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:file_picker/file_picker.dart';
@@ -38,12 +39,66 @@ class ApiService {
     : _client = client ?? http.Client(),
       _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
-  // Development-only token storage.
-  // The token disappears when the app is restarted.
+  // Authentication token, restored from secure storage at startup.
   String? _token;
+
+  Future<void> restoreToken() async {
+    try {
+      final savedToken = await _secureStorage.read(
+        key: 'salamasphere_api_token',
+      );
+
+      if (savedToken != null && savedToken.trim().isNotEmpty) {
+        _token = savedToken;
+      }
+    } catch (e) {
+      // If secure storage cannot be accessed, continue unauthenticated.
+      _token = null;
+    }
+  }
+
   final Map<String, String> _wearableClientEventIds = <String, String>{};
 
   bool get isAuthenticated => _token != null;
+
+  /// Checks whether the Render backend is awake and its database is available.
+  /// Retries once if the first health check times out or returns an error.
+  Future<bool> waitForBackend() async {
+    final healthUri = Uri.parse('${ApiConfig.baseUrl}/api/health/');
+
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        debugPrint('SalamaSphere backend health check: attempt $attempt');
+
+        final response = await _client
+            .get(healthUri, headers: {'Accept': 'application/json'})
+            .timeout(const Duration(seconds: 60));
+
+        if (response.statusCode == 200) {
+          final decoded = jsonDecode(response.body);
+
+          if (decoded is Map &&
+              decoded['status'] == 'healthy' &&
+              decoded['database'] == 'connected') {
+            debugPrint('SalamaSphere backend is ready.');
+            return true;
+          }
+        }
+
+        debugPrint('Backend not ready. HTTP ${response.statusCode}');
+      } on TimeoutException {
+        debugPrint('Backend health check timed out.');
+      } catch (error) {
+        debugPrint('Backend connection check failed: $error');
+      }
+
+      if (attempt < 2) {
+        await Future.delayed(const Duration(seconds: 3));
+      }
+    }
+
+    return false;
+  }
 
   String? get authToken => _token;
 
@@ -63,6 +118,19 @@ class ApiService {
     required String username,
     required String password,
   }) async {
+    // First, make sure the backend is awake.
+    final backendReady = await waitForBackend();
+
+    if (!backendReady) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message':
+            'SalamaSphere services are taking longer than expected '
+            'to start. Please check your connection and try again.',
+      };
+    }
+
     final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.loginEndpoint}');
 
     try {
@@ -75,9 +143,127 @@ class ApiService {
             },
             body: jsonEncode({'username': username, 'password': password}),
           )
+          .timeout(const Duration(seconds: 30));
+
+      dynamic decoded;
+
+      try {
+        decoded = jsonDecode(response.body);
+      } catch (_) {
+        decoded = null;
+      }
+
+      final data = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+
+      final token = _firstNonEmptyString([
+        data['token'],
+        data['key'],
+        data['access'],
+        data['access_token'],
+      ]);
+
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          token != null) {
+        _token = token;
+
+        try {
+          await _secureStorage.write(
+            key: 'salamasphere_api_token',
+            value: token,
+          );
+        } catch (_) {
+          // Keep the in-memory token if secure storage is unavailable.
+        }
+
+        return {
+          'success': true,
+          'status_code': response.statusCode,
+          'username': data['username'],
+          'role': data['role'],
+          'is_superuser': data['is_superuser'] == true,
+          'authority_status': data['authority_status'],
+          'message': data['message'] ?? 'Login successful.',
+        };
+      }
+
+      return {
+        'success': false,
+        'status_code': response.statusCode,
+        'message': _responseErrorMessage(data, statusCode: response.statusCode),
+      };
+    } on TimeoutException {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'The login request timed out. Please try again.',
+      };
+    } catch (error) {
+      debugPrint('SalamaSphere login connection error: $error');
+
+      return {
+        'success': false,
+        'status_code': null,
+        'message':
+            'Could not connect to SalamaSphere. '
+            'Check your internet connection and try again.',
+      };
+    }
+  }
+
+  String? _firstNonEmptyString(Iterable<dynamic> values) {
+    for (final value in values) {
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    return null;
+  }
+
+  String _responseErrorMessage(
+    Map<String, dynamic> data, {
+    required int statusCode,
+  }) {
+    final detail = data['detail'] ?? data['message'] ?? data['error'];
+    if (detail is String && detail.trim().isNotEmpty) return detail.trim();
+
+    if (statusCode >= 500) {
+      return 'The SalamaSphere server is currently failing to process login '
+          '(HTTP $statusCode). Please try again shortly or contact support.';
+    }
+
+    if (statusCode == 401 || statusCode == 403) {
+      return 'Invalid username or password.';
+    }
+
+    return 'Login failed. Check your credentials and try again.';
+  }
+
+  Future<Map<String, dynamic>> getCurrentUser() async {
+    if (_token == null || _token!.isEmpty) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'No authentication token is available.',
+      };
+    }
+
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}${ApiConfig.currentUserEndpoint}',
+    );
+
+    try {
+      final response = await _client
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Token $_token',
+            },
+          )
           .timeout(const Duration(seconds: 15));
 
-      final Map<String, dynamic> data;
+      Map<String, dynamic> data;
 
       try {
         final decoded = jsonDecode(response.body);
@@ -90,20 +276,7 @@ class ApiService {
         };
       }
 
-      if (response.statusCode == 200 &&
-          data['token'] is String &&
-          (data['token'] as String).isNotEmpty) {
-        _token = data['token'] as String;
-        try {
-          await _secureStorage.write(
-            key: 'salamasphere_api_token',
-            value: _token,
-          );
-        } catch (_) {
-          // Authentication still succeeds if secure storage is unavailable on
-          // a development platform; the in-memory token remains usable.
-        }
-
+      if (response.statusCode == 200) {
         return {
           'success': true,
           'status_code': response.statusCode,
@@ -111,14 +284,24 @@ class ApiService {
           'role': data['role'],
           'is_superuser': data['is_superuser'] == true,
           'authority_status': data['authority_status'],
-          'message': 'Login successful.',
+          'message': 'Authentication verified.',
         };
+      }
+
+      if (response.statusCode == 401) {
+        _token = null;
+
+        try {
+          await _secureStorage.delete(key: 'salamasphere_api_token');
+        } catch (_) {
+          // Continue unauthenticated if storage is unavailable.
+        }
       }
 
       return {
         'success': false,
         'status_code': response.statusCode,
-        'message': data['detail'] ?? 'Login failed. Check your credentials.',
+        'message': data['detail'] ?? 'Authentication could not be verified.',
       };
     } catch (error) {
       return {
@@ -154,7 +337,11 @@ class ApiService {
               'role': role,
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 60));
+
+      debugPrint('LOGIN STATUS: ${response.statusCode}');
+      debugPrint('LOGIN CONTENT TYPE: ${response.headers['content-type']}');
+      debugPrint('LOGIN RESPONSE BODY: ${response.body}');
 
       dynamic decoded;
 
@@ -297,6 +484,128 @@ class ApiService {
     );
   }
 
+  Future<Map<String, dynamic>> fetchNotifications() {
+    return _requestJson('GET', ApiConfig.notificationDeliveriesEndpoint);
+  }
+
+  Future<Map<String, dynamic>> createUserIncident({
+    required String description,
+    required String shareWith,
+  }) async {
+    if (_token == null) {
+      return {
+        'success': false,
+        'message': 'Please log in before submitting evidence.',
+      };
+    }
+    final payload = <String, dynamic>{
+      'client_event_id': generateClientEventId(),
+      'source': 'mobile',
+      'event_type': 'user_report',
+      'description': description.trim(),
+      'share_with': shareWith,
+      'is_sos': false,
+      'threat_level': 'medium',
+      'occurred_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    return _requestJson('POST', ApiConfig.incidentsEndpoint, body: payload);
+  }
+
+  Future<Map<String, dynamic>> uploadEvidenceVault({
+    required String incidentId,
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+    required String shareWith,
+    String message = '',
+  }) async {
+    if (_token == null) {
+      return {
+        'success': false,
+        'message': 'Please log in before uploading evidence.',
+      };
+    }
+    final request =
+        http.MultipartRequest(
+            'POST',
+            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.evidenceVaultEndpoint}'),
+          )
+          ..headers.addAll({
+            'Accept': 'application/json',
+            'Authorization': 'Token $_token',
+          })
+          ..fields['incident'] = incidentId
+          ..fields['incident_id'] = incidentId
+          ..fields['media_type'] = mimeType.startsWith('video/')
+              ? 'video'
+              : 'audio'
+          ..fields['visibility'] = 'protected'
+          ..fields['share_with'] = shareWith
+          ..fields['message'] = message
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'file',
+              bytes,
+              filename: fileName,
+              contentType: MediaType.parse(mimeType),
+            ),
+          );
+    try {
+      final response = await _client
+          .send(request)
+          .timeout(const Duration(seconds: 30));
+      final body = await http.Response.fromStream(response);
+      dynamic data;
+      try {
+        data = jsonDecode(body.body);
+      } catch (_) {
+        data = null;
+      }
+      final success = response.statusCode >= 200 && response.statusCode < 300;
+      final serverMessage = data is Map
+          ? (data['detail'] ?? data['message'] ?? data['error'])?.toString()
+          : null;
+      return {
+        'success': success,
+        'status_code': response.statusCode,
+        'data': data,
+        'message': success
+            ? 'Evidence uploaded to the evidence vault.'
+            : serverMessage ??
+                  'Could not upload evidence (HTTP ${response.statusCode}).',
+      };
+    } catch (error) {
+      return {
+        'success': false,
+        'message': 'Network error while uploading evidence: $error',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> addIncidentFollowUpNote({
+    required String incidentId,
+    required String note,
+  }) {
+    return _requestJson(
+      'POST',
+      ApiConfig.incidentFollowUpNotesEndpoint(incidentId),
+      body: {'note': note.trim()},
+    );
+  }
+
+  Future<Map<String, dynamic>> recordIncidentAudit({
+    required String incidentId,
+    required String action,
+    Map<String, dynamic>? metadata,
+  }) {
+    return _requestJson(
+      'POST',
+      ApiConfig.incidentAuditEndpoint(incidentId),
+      // ignore: use_null_aware_elements
+      body: {'action': action, if (metadata != null) 'metadata': metadata},
+    );
+  }
+
   Future<Map<String, dynamic>> _requestJson(
     String method,
     String endpoint, {
@@ -356,8 +665,8 @@ class ApiService {
   Future<Map<String, dynamic>> uploadIncidentAudio({
     required String incidentId,
     required List<int> bytes,
-    String fileName = 'sos-audio.bin',
-    String mimeType = 'application/octet-stream',
+    String fileName = 'sos-audio.wav',
+    String mimeType = 'audio/wav',
   }) async {
     if (_token == null) {
       return {
@@ -532,8 +841,9 @@ class ApiService {
         payload['location_accuracy_m'] = locationAccuracy;
       }
       if (locationCapturedAt != null) {
-        payload['location_captured_at'] =
-            locationCapturedAt.toUtc().toIso8601String();
+        payload['location_captured_at'] = locationCapturedAt
+            .toUtc()
+            .toIso8601String();
       }
       if (locationSource != null && locationSource.trim().isNotEmpty) {
         payload['location_source'] = locationSource.trim();

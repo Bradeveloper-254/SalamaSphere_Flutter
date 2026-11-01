@@ -17,8 +17,7 @@ class IncidentLocation {
 class LocationService {
   Future<IncidentLocation?> captureLocation() async {
     try {
-      final serviceEnabled =
-          await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
       if (!serviceEnabled) {
         return null;

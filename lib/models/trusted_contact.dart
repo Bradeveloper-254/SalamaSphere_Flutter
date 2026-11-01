@@ -25,20 +25,21 @@ class TrustedContact {
       name: (json['name'] ?? '').toString(),
       phoneNumber: (json['phone_number'] ?? json['phone'] ?? '').toString(),
       email: json['email']?.toString(),
-      smsEnabled: json['sms_enabled'] != false,
+      smsEnabled:
+          (json['sms_enabled'] ?? json['receive_sos_alerts'] ?? true) == true,
       pushEnabled: json['push_enabled'] == true,
       emailEnabled: json['email_enabled'] == true,
-      active: json['active'] != false,
+      active: (json['active'] ?? json['is_active'] ?? true) == true,
     );
   }
 
   Map<String, dynamic> toJson() => {
     'name': name.trim(),
     'phone_number': phoneNumber.trim(),
-    if (email != null && email!.trim().isNotEmpty) 'email': email!.trim(),
-    'sms_enabled': smsEnabled,
-    'push_enabled': pushEnabled,
-    'email_enabled': emailEnabled,
-    'active': active,
+    // These names match the Django trusted_contacts serializer. The
+    // backend currently delivers SOS alerts by SMS; unsupported channel
+    // fields must not be sent as unknown serializer fields.
+    'receive_sos_alerts': smsEnabled,
+    'is_active': active,
   };
 }

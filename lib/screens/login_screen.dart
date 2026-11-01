@@ -7,6 +7,7 @@ import 'dashboards/admin.dart';
 import 'dashboards/authority.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
+import 'incident_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final ApiService apiService;
@@ -23,8 +24,16 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isCheckingSession = true;
   bool _obscurePassword = true;
   String? _errorMessage;
+  String? _loadingMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingSession();
+  }
 
   @override
   void dispose() {
@@ -33,41 +42,24 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final result = await widget.apiService.login(
-      username: _usernameController.text.trim(),
-      password: _passwordController.text,
-    );
-
+  Future<void> _navigateForAccount(Map<String, dynamic> result) async {
     if (!mounted) return;
-
-    if (result['success'] != true) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage =
-            result['message']?.toString() ??
-            'Unable to sign in. Please try again.';
-      });
-      return;
-    }
 
     final username =
         result['username']?.toString() ?? _usernameController.text.trim();
+
     final role = result['role']?.toString().toLowerCase();
+
     final authorityStatus = result['authority_status']
         ?.toString()
         .toLowerCase();
+
     final isSuperuser = result['is_superuser'] == true;
 
+    // Preserve authority verification restrictions.
     if (role == 'authority' && authorityStatus != 'approved') {
       widget.apiService.logout();
+
       setState(() {
         _isLoading = false;
         _errorMessage =
@@ -77,6 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final Widget destination;
+
     if (isSuperuser || role == 'admin') {
       destination = AdminDashboardScreen(
         apiService: widget.apiService,
@@ -92,8 +85,17 @@ class _LoginScreenState extends State<LoginScreen> {
         apiService: widget.apiService,
         username: username,
       );
+    } else if (role == 'trusted_contact' ||
+        role == 'responder' ||
+        role == 'designated_responder') {
+      destination = IncidentDashboardScreen(
+        apiService: widget.apiService,
+        username: username,
+        role: role!,
+      );
     } else {
       widget.apiService.logout();
+
       setState(() {
         _isLoading = false;
         _errorMessage =
@@ -103,8 +105,86 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = false);
+
     await Navigator.of(context)
         .pushReplacement(MaterialPageRoute<void>(builder: (_) => destination));
+  }
+
+  Future<void> _checkExistingSession() async {
+    if (!widget.apiService.isAuthenticated) {
+      if (mounted) {
+        setState(() => _isCheckingSession = false);
+      }
+      return;
+    }
+
+    setState(() {
+      _isCheckingSession = true;
+      _errorMessage = null;
+    });
+
+    final result = await widget.apiService.getCurrentUser();
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      await _navigateForAccount(result);
+      return;
+    }
+
+    final statusCode = result['status_code'];
+
+    setState(() {
+      _isCheckingSession = false;
+
+      if (statusCode != 401 && widget.apiService.isAuthenticated) {
+        _errorMessage = 'Could not verify your saved session. Check your internet connection and retry.';
+      }
+    });
+  }
+
+  Future<void> _login() async {
+    if (_isLoading) return;
+
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _loadingMessage = 'Connecting to SalamaSphere services. Please wait...';
+    });
+
+    try {
+      final result = await widget.apiService.login(
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      if (!mounted) return;
+
+      if (result['success'] != true) {
+        setState(() {
+          _isLoading = false;
+          _loadingMessage = null;
+          _errorMessage =
+              result['message']?.toString() ??
+              'Unable to sign in. Please try again.';
+        });
+        return;
+      }
+
+      await _navigateForAccount(result);
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+        _loadingMessage = null;
+        _errorMessage = 'Unable to connect to SalamaSphere. Check your internet connection and try again.';
+      });
+
+      debugPrint('SalamaSphere login error: $error');
+    }
   }
 
   void _openRegister() {
@@ -126,6 +206,21 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFF176B5B);
+
+    if (_isCheckingSession) {
+      return const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 20),
+              Text('Checking your secure session...'),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -164,6 +259,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 28),
                     TextFormField(
                       controller: _usernameController,
+                      enabled: !_isLoading,
                       textInputAction: TextInputAction.next,
                       autocorrect: false,
                       decoration: const InputDecoration(
@@ -179,6 +275,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _passwordController,
+                      enabled: !_isLoading,
+                      autocorrect: false,
                       obscureText: _obscurePassword,
                       textInputAction: TextInputAction.done,
                       onFieldSubmitted: (_) {
@@ -214,6 +312,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(color: Colors.red.shade700),
                       ),
                     ],
+                    if (!_isCheckingSession &&
+                        widget.apiService.isAuthenticated) ...[
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: _isLoading ? null : _checkExistingSession,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry session verification'),
+                      ),
+                    ],
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
@@ -222,6 +329,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    if (_loadingMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _loadingMessage!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFF176B5B),
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     SizedBox(
                       height: 50,
                       child: FilledButton(

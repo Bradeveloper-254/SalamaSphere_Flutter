@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../login_screen.dart';
 import '../assigned_cases_screen.dart';
+import '../incident_dashboard_screen.dart';
 
 class AuthorityDashboardScreen extends StatelessWidget {
   final ApiService apiService;
@@ -59,11 +60,28 @@ class AuthorityDashboardScreen extends StatelessWidget {
     );
   }
 
+  void _openIncidentDashboard(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => IncidentDashboardScreen(
+          apiService: apiService,
+          username: username,
+          role: 'authority',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    const navy = Color(0xFF102A43);
+    const teal = Color(0xFF087F8C);
+    const coral = Color(0xFFE76F51);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Authority Dashboard'),
+        backgroundColor: navy,
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             tooltip: 'Log out',
@@ -78,7 +96,7 @@ class AuthorityDashboardScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              color: Colors.indigo,
+              color: navy,
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
@@ -109,6 +127,37 @@ class AuthorityDashboardScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: _statusTile(
+                  Icons.folder_shared,
+                  'Assigned',
+                  'Cases',
+                  teal,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _statusTile(
+                  Icons.priority_high,
+                  'Urgent',
+                  'Alerts',
+                  coral,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _statusTile(
+                  Icons.fact_check_outlined,
+                  'Review',
+                  'Status',
+                  navy,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           const Text(
             'Authority Services',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
@@ -132,7 +181,7 @@ class AuthorityDashboardScreen extends StatelessWidget {
             title: 'Evidence Vault',
             description: 'Access authorized incident evidence and its integrity records.',
             color: Colors.teal,
-            onTap: () => _showComingSoon(context, 'Evidence Vault'),
+            onTap: () => _openIncidentDashboard(context),
           ),
           _featureCard(
             icon: Icons.notifications_active,
@@ -168,6 +217,66 @@ class AuthorityDashboardScreen extends StatelessWidget {
             style: TextStyle(color: Colors.blueGrey, fontSize: 13),
           ),
         ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: Colors.white,
+        indicatorColor: teal.withValues(alpha: 0.16),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard, color: teal),
+            label: 'Overview',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_shared_outlined),
+            selectedIcon: Icon(Icons.folder_shared, color: teal),
+            label: 'Cases',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.notifications_active_outlined),
+            selectedIcon: Icon(Icons.notifications_active, color: coral),
+            label: 'Alerts',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.fact_check_outlined),
+            selectedIcon: Icon(Icons.fact_check, color: navy),
+            label: 'Review',
+          ),
+        ],
+        onDestinationSelected: (index) {
+          if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AssignedCasesScreen(apiService: apiService),
+              ),
+            );
+          } else if (index == 2) {
+            _showComingSoon(context, 'Urgent alerts');
+          } else if (index == 3) {
+            _openIncidentDashboard(context);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _statusTile(IconData icon, String value, String label, Color color) {
+    return Card(
+      elevation: 0,
+      color: color.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        child: Column(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
+            ),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
+        ),
       ),
     );
   }

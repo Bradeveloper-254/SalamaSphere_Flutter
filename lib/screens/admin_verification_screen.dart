@@ -6,18 +6,14 @@ import '../services/api_service.dart';
 class AdminVerificationScreen extends StatefulWidget {
   final ApiService apiService;
 
-  const AdminVerificationScreen({
-    super.key,
-    required this.apiService,
-  });
+  const AdminVerificationScreen({super.key, required this.apiService});
 
   @override
   State<AdminVerificationScreen> createState() =>
       _AdminVerificationScreenState();
 }
 
-class _AdminVerificationScreenState
-    extends State<AdminVerificationScreen> {
+class _AdminVerificationScreenState extends State<AdminVerificationScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -35,8 +31,7 @@ class _AdminVerificationScreenState
       _errorMessage = null;
     });
 
-    final result =
-        await widget.apiService.fetchPendingAuthorityDocuments();
+    final result = await widget.apiService.fetchPendingAuthorityDocuments();
 
     if (!mounted) return;
 
@@ -44,8 +39,7 @@ class _AdminVerificationScreenState
       _isLoading = false;
 
       if (result['success'] == true) {
-        _documents =
-            result['documents'] as List<AuthorityVerificationDocument>;
+        _documents = result['documents'] as List<AuthorityVerificationDocument>;
       } else {
         _errorMessage =
             result['message']?.toString() ??
@@ -78,8 +72,7 @@ class _AdminVerificationScreenState
             ),
             actions: [
               TextButton(
-                onPressed: () =>
-                    Navigator.of(dialogContext).pop(),
+                onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('Cancel'),
               ),
               FilledButton(
@@ -89,9 +82,7 @@ class _AdminVerificationScreenState
                   if (reason.isEmpty) {
                     ScaffoldMessenger.of(dialogContext).showSnackBar(
                       const SnackBar(
-                        content: Text(
-                          'A rejection reason is required.',
-                        ),
+                        content: Text('A rejection reason is required.'),
                       ),
                     );
                     return;
@@ -110,11 +101,7 @@ class _AdminVerificationScreenState
 
       if (reason == null || reason.trim().isEmpty) return;
 
-      await _submitReview(
-        document,
-        decision,
-        reason.trim(),
-      );
+      await _submitReview(document, decision, reason.trim());
 
       return;
     }
@@ -130,13 +117,11 @@ class _AdminVerificationScreenState
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(false),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(true),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('Accept document'),
             ),
           ],
@@ -167,8 +152,7 @@ class _AdminVerificationScreenState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          result['message']?.toString() ??
-              'The review could not be completed.',
+          result['message']?.toString() ?? 'The review could not be completed.',
         ),
       ),
     );
@@ -215,18 +199,13 @@ class _AdminVerificationScreenState
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadDocuments,
-        child: _buildBody(),
-      ),
+      body: RefreshIndicator(onRefresh: _loadDocuments, child: _buildBody()),
     );
   }
 
   Widget _buildBody() {
     if (_isLoading && _documents.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_errorMessage != null && _documents.isEmpty) {
@@ -235,15 +214,9 @@ class _AdminVerificationScreenState
         padding: const EdgeInsets.all(24),
         children: [
           const SizedBox(height: 100),
-          const Icon(
-            Icons.cloud_off,
-            size: 56,
-          ),
+          const Icon(Icons.cloud_off, size: 56),
           const SizedBox(height: 16),
-          Text(
-            _errorMessage!,
-            textAlign: TextAlign.center,
-          ),
+          Text(_errorMessage!, textAlign: TextAlign.center),
           const SizedBox(height: 16),
           Center(
             child: FilledButton.icon(
@@ -262,18 +235,12 @@ class _AdminVerificationScreenState
         padding: const EdgeInsets.all(24),
         children: const [
           SizedBox(height: 100),
-          Icon(
-            Icons.verified_user_outlined,
-            size: 64,
-          ),
+          Icon(Icons.verified_user_outlined, size: 64),
           SizedBox(height: 16),
           Text(
             'No pending verification documents.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           SizedBox(height: 8),
           Text(
@@ -293,10 +260,7 @@ class _AdminVerificationScreenState
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(
-                  Icons.pending_actions,
-                  size: 32,
-                ),
+                const Icon(Icons.pending_actions, size: 32),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -309,9 +273,7 @@ class _AdminVerificationScreenState
                           fontSize: 17,
                         ),
                       ),
-                      Text(
-                        '${_documents.length} document(s) awaiting review',
-                      ),
+                      Text('${_documents.length} document(s) awaiting review'),
                     ],
                   ),
                 ),
@@ -331,9 +293,7 @@ class _AdminVerificationScreenState
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const CircleAvatar(
-                        child: Icon(Icons.badge_outlined),
-                      ),
+                      const CircleAvatar(child: Icon(Icons.badge_outlined)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -370,28 +330,19 @@ class _AdminVerificationScreenState
                     _formatDocumentType(document.reviewStatus),
                   ),
                   const SizedBox(height: 8),
-                  _detailRow(
-                    'Submitted',
-                    _formatDate(document.submittedAt),
-                  ),
+                  _detailRow('Submitted', _formatDate(document.submittedAt)),
                   const SizedBox(height: 20),
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
                     children: [
                       FilledButton.icon(
-                        onPressed: () => _reviewDocument(
-                          document,
-                          'accepted',
-                        ),
+                        onPressed: () => _reviewDocument(document, 'accepted'),
                         icon: const Icon(Icons.check_circle_outline),
                         label: const Text('Accept'),
                       ),
                       OutlinedButton.icon(
-                        onPressed: () => _reviewDocument(
-                          document,
-                          'rejected',
-                        ),
+                        onPressed: () => _reviewDocument(document, 'rejected'),
                         icon: const Icon(Icons.cancel_outlined),
                         label: const Text('Reject'),
                       ),
@@ -413,14 +364,10 @@ class _AdminVerificationScreenState
           width: 105,
           child: Text(
             label,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
-        Expanded(
-          child: Text(value),
-        ),
+        Expanded(child: Text(value)),
       ],
     );
   }
