@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"name": "salamasphere_mobile",
+			"path": "."
+		}
+	],
+	"settings": {
+		"java.compile.nullAnalysis.mode": "automatic"
+	}
+}
