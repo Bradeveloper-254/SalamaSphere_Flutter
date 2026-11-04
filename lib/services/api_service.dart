@@ -449,6 +449,23 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> fetchDashboardOverview() async {
+    final response = await _requestJson(
+      'GET',
+      ApiConfig.dashboardOverviewEndpoint,
+    );
+
+    if (response['success'] == true) return response;
+
+    return {
+      ...response,
+      'message': response['status_code'] == null
+          ? response['message']
+          : 'Could not retrieve dashboard incidents '
+                '(HTTP ${response['status_code']}).',
+    };
+  }
+
   Future<Map<String, dynamic>> fetchTrustedContacts() async {
     return _requestJson('GET', ApiConfig.trustedContactsEndpoint);
   }
@@ -467,16 +484,6 @@ class ApiService {
     return _requestJson('DELETE', '${ApiConfig.trustedContactsEndpoint}$id/');
   }
 
-  Future<Map<String, dynamic>> dispatchIncidentNotifications(
-    String incidentId,
-  ) {
-    return _requestJson(
-      'POST',
-      ApiConfig.incidentNotificationEndpoint(incidentId),
-      body: const {'channel': 'sms'},
-    );
-  }
-
   Future<Map<String, dynamic>> fetchNotificationDeliveries(String incidentId) {
     return _requestJson(
       'GET',
@@ -486,6 +493,106 @@ class ApiService {
 
   Future<Map<String, dynamic>> fetchNotifications() {
     return _requestJson('GET', ApiConfig.notificationDeliveriesEndpoint);
+  }
+
+  Future<Map<String, dynamic>> markNotificationRead(
+    String notificationId, {
+    bool isRead = true,
+  }) {
+    return _requestJson(
+      'PATCH',
+      ApiConfig.notificationDetailEndpoint(notificationId),
+      body: {'is_read': isRead},
+    );
+  }
+
+  Future<Map<String, dynamic>> fetchAdminUnassignedIncidents() {
+    return _requestJson('GET', ApiConfig.adminUnassignedIncidentsEndpoint);
+  }
+
+  Future<Map<String, dynamic>> fetchAssignableAuthorities(String incidentId) {
+    final query = Uri(queryParameters: {'incident_id': incidentId}).query;
+    return _requestJson(
+      'GET',
+      '${ApiConfig.adminAssignableAuthoritiesEndpoint}?$query',
+    );
+  }
+
+  Future<Map<String, dynamic>> assignIncident({
+    required String incidentId,
+    required int authorityId,
+  }) {
+    return _requestJson(
+      'POST',
+      ApiConfig.adminIncidentAssignmentsEndpoint,
+      body: {'incident_id': incidentId, 'authority_id': authorityId},
+    );
+  }
+
+  Future<Map<String, dynamic>> updateAuthorityPresence({
+    required bool isAvailable,
+    double? latitude,
+    double? longitude,
+  }) {
+    return _requestJson(
+      'POST',
+      ApiConfig.authorityPresenceEndpoint,
+      body: {
+        'is_available': isAvailable,
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> resolveAssignedIncident(String incidentId) {
+    return _requestJson(
+      'POST',
+      ApiConfig.resolveAssignedIncidentEndpoint(incidentId),
+      body: const {},
+    );
+  }
+
+  Future<Map<String, dynamic>> fetchVerificationDocumentFile(
+    int documentId,
+  ) async {
+    if (_token == null) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'Please log in before viewing verification documents.',
+      };
+    }
+
+    try {
+      final response = await _client
+          .get(
+            Uri.parse(
+              '${ApiConfig.baseUrl}'
+              '${ApiConfig.adminVerificationDocumentDownloadEndpoint(documentId)}',
+            ),
+            headers: {'Accept': '*/*', 'Authorization': 'Token $_token'},
+          )
+          .timeout(const Duration(seconds: 30));
+      final success = response.statusCode >= 200 && response.statusCode < 300;
+      return {
+        'success': success,
+        'status_code': response.statusCode,
+        'bytes': success ? response.bodyBytes : null,
+        'mime_type':
+            response.headers['content-type'] ?? 'application/octet-stream',
+        'message': success
+            ? 'Verification document retrieved.'
+            : 'Could not retrieve verification document '
+                  '(HTTP ${response.statusCode}).',
+      };
+    } catch (error) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'Could not retrieve verification document: $error',
+      };
+    }
   }
 
   Future<Map<String, dynamic>> createUserIncident({
@@ -517,6 +624,7 @@ class ApiService {
     required String fileName,
     required String mimeType,
     required String shareWith,
+    List<int> trustedContactIds = const [],
     String message = '',
   }) async {
     if (_token == null) {
@@ -528,7 +636,10 @@ class ApiService {
     final request =
         http.MultipartRequest(
             'POST',
-            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.evidenceVaultEndpoint}'),
+            Uri.parse(
+              '${ApiConfig.baseUrl}'
+              '${ApiConfig.incidentEvidenceEndpoint(incidentId)}',
+            ),
           )
           ..headers.addAll({
             'Accept': 'application/json',
@@ -542,6 +653,11 @@ class ApiService {
           ..fields['visibility'] = 'protected'
           ..fields['share_with'] = shareWith
           ..fields['message'] = message
+          ..fields.addAll({
+            for (var index = 0; index < trustedContactIds.length; index++)
+              'trusted_contact_ids[$index]': trustedContactIds[index]
+                  .toString(),
+          })
           ..files.add(
             http.MultipartFile.fromBytes(
               'file',
@@ -570,7 +686,7 @@ class ApiService {
         'status_code': response.statusCode,
         'data': data,
         'message': success
-            ? 'Evidence uploaded to the evidence vault.'
+            ? 'Evidence uploaded successfully.'
             : serverMessage ??
                   'Could not upload evidence (HTTP ${response.statusCode}).',
       };
@@ -578,6 +694,45 @@ class ApiService {
       return {
         'success': false,
         'message': 'Network error while uploading evidence: $error',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchEvidenceFile(String evidenceId) async {
+    if (_token == null) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'Please log in before accessing evidence.',
+      };
+    }
+
+    try {
+      final response = await _client
+          .get(
+            Uri.parse(
+              '${ApiConfig.baseUrl}'
+              '${ApiConfig.evidenceFileEndpoint(evidenceId)}',
+            ),
+            headers: {'Accept': '*/*', 'Authorization': 'Token $_token'},
+          )
+          .timeout(const Duration(seconds: 30));
+      final success = response.statusCode >= 200 && response.statusCode < 300;
+      return {
+        'success': success,
+        'status_code': response.statusCode,
+        'bytes': success ? response.bodyBytes : null,
+        'mime_type':
+            response.headers['content-type'] ?? 'application/octet-stream',
+        'message': success
+            ? 'Evidence retrieved successfully.'
+            : 'Could not retrieve evidence (HTTP ${response.statusCode}).',
+      };
+    } catch (error) {
+      return {
+        'success': false,
+        'status_code': null,
+        'message': 'Could not retrieve evidence: $error',
       };
     }
   }
@@ -615,7 +770,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Please log in before using emergency notifications.',
+        'message': 'Please log in before making this request.',
       };
     }
 
@@ -642,22 +797,24 @@ class ApiService {
         decoded = result.body;
       }
       final success = response.statusCode >= 200 && response.statusCode < 300;
+      final errorMessage = decoded is Map<String, dynamic>
+          ? _registrationErrorMessage(decoded)
+          : '';
       return {
         'success': success,
         'status_code': response.statusCode,
         'data': decoded,
         'message': success
             ? 'Request completed.'
-            : decoded is Map &&
-                  (decoded['detail'] ?? decoded['message']) != null
-            ? (decoded['detail'] ?? decoded['message']).toString()
-            : 'The notification service request failed.',
+            : errorMessage.isNotEmpty
+            ? errorMessage
+            : 'Request failed (HTTP ${response.statusCode}).',
       };
     } catch (error) {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to the notification service: $error',
+        'message': 'Could not connect to SalamaSphere: $error',
       };
     }
   }

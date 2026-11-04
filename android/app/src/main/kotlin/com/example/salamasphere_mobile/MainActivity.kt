@@ -12,25 +12,48 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.salamasphere/share")
             .setMethodCallHandler { call, result ->
-            if (call.method == "shareAudio") {
-                val title = call.argument<String>("title") ?: "SalamaSphere recording"
-                val fileName = call.argument<String>("fileName") ?: "salamasphere-recording.wav"
-                val mimeType = call.argument<String>("mimeType") ?: "audio/wav"
+            if (call.method == "shareAudio" || call.method == "shareMedia" ||
+                call.method == "viewMedia") {
+                val title = call.argument<String>("title") ?: "SalamaSphere evidence"
+                val fileName = call.argument<String>("fileName") ?: "salamasphere-evidence"
+                val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
                 val bytes = call.argument<ByteArray>("bytes")
                 if (bytes == null || bytes.isEmpty()) {
-                    result.error("EMPTY_AUDIO", "No audio bytes were supplied.", null)
+                    result.error("EMPTY_MEDIA", "No media bytes were supplied.", null)
                     return@setMethodCallHandler
                 }
                 val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
                 val file = File(cacheDir, safeName)
                 file.writeBytes(bytes)
                 val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                    type = mimeType
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, title)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }, title))
+                val intent = if (call.method == "viewMedia") {
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mimeType)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                } else {
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = mimeType
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, title)
+                        putExtra(Intent.EXTRA_TEXT, call.argument<String>("text") ?: title)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                }
+                try {
+                    if (call.method == "viewMedia") {
+                        startActivity(intent)
+                    } else {
+                        startActivity(Intent.createChooser(intent, title))
+                    }
+                } catch (error: android.content.ActivityNotFoundException) {
+                    result.error(
+                        "NO_MEDIA_HANDLER",
+                        "No installed app can open this media file.",
+                        error.message
+                    )
+                    return@setMethodCallHandler
+                }
                 result.success(null)
                 return@setMethodCallHandler
             }

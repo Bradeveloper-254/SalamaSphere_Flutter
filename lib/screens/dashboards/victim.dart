@@ -8,7 +8,6 @@ import 'package:file_picker/file_picker.dart';
 
 import '../../models/wearable_event.dart';
 import '../../services/api_service.dart';
-import '../../services/protected_media_service.dart';
 import '../../services/ble_service.dart';
 import '../../services/incident_sync_service.dart';
 import '../../services/local_database_service.dart';
@@ -63,7 +62,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   final LocationService _locationService = LocationService();
   final LocalDatabaseService _localDatabase = LocalDatabaseService.instance;
   late final IncidentSyncService _incidentSync;
-  late final ProtectedMediaService _protectedMedia;
   late final NotificationService _notifications;
   StreamSubscription<WearableEvent>? _wearableSubscription;
   StreamSubscription<String>? _recordingStatusSubscription;
@@ -91,7 +89,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   void initState() {
     super.initState();
     _incidentSync = IncidentSyncService(database: _localDatabase);
-    _protectedMedia = ProtectedMediaService(widget.apiService);
     _notifications = NotificationService(widget.apiService);
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
       _retryPendingUploads,
@@ -118,64 +115,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     await _incidentSync.synchronizePendingAudio(
       upload: widget.apiService.uploadIncidentAudio,
     );
-    for (final incident in await _localDatabase.getAllIncidents()) {
-      final clientEventId = incident['client_event_id']?.toString();
-      final serverIncidentId = incident['server_incident_id']?.toString();
-      if (clientEventId == null || serverIncidentId == null) continue;
-      final audio = await _localDatabase.getIncidentAudio(clientEventId);
-      if (audio == null || audio['protected_upload_status'] == 'uploaded') {
-        continue;
-      }
-      final bytes = await _localDatabase.getIncidentAudioBytes(clientEventId);
-      if (bytes == null) continue;
-      final protectedResult = await _protectedMedia.uploadRecording(
-        incidentId: serverIncidentId,
-        bytes: bytes,
-        fileName: audio['file_name']?.toString() ?? 'sos-audio.wav',
-        mimeType: audio['mime_type']?.toString() ?? 'audio/wav',
-      );
-      if (protectedResult['success'] == true) {
-        await _localDatabase.markProtectedMediaUploaded(
-          clientEventId: clientEventId,
-        );
-        final acknowledgements = protectedResult['acknowledgements'];
-        if (acknowledgements is Map &&
-            (acknowledgements['evidence_hash_calculated'] == true ||
-                acknowledgements['hash_calculated'] == true)) {
-          await _localDatabase.markEvidenceHashCalculated(
-            clientEventId: clientEventId,
-            hash:
-                (acknowledgements['evidence_hash'] ??
-                        acknowledgements['sha256'])
-                    ?.toString(),
-          );
-        }
-      }
-    }
-    await _notifySynchronizedIncidents();
     if (mounted) await _loadIncidents();
-  }
-
-  Future<void> _notifySynchronizedIncidents() async {
-    final incidents = await _localDatabase.getAllIncidents();
-    for (final incident in incidents) {
-      final serverId = incident['server_incident_id']?.toString();
-      if (serverId == null || serverId.isEmpty) continue;
-      final notified = incident['notification_ack_status']?.toString();
-      if (notified == 'submitted') continue;
-      final result = await _notifications.notifyIncident(serverId);
-      // Notification delivery is ultimately confirmed by provider callbacks
-      // on the backend; this only records that dispatch was attempted in the
-      // client session. The server remains the source of truth.
-      if (result['success'] == true) {
-        final clientEventId = incident['client_event_id']?.toString();
-        if (clientEventId != null) {
-          await _localDatabase.markNotificationSubmitted(
-            clientEventId: clientEventId,
-          );
-        }
-      }
-    }
   }
 
   Future<void> _loadIncidents() async {
@@ -189,31 +129,27 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     }
 
     try {
-      final response = await widget.apiService.fetchIncidents();
+      final response = await widget.apiService.fetchDashboardOverview();
 
       if (!mounted) return;
 
       final dynamic data = response['data'];
       final List<dynamic> retrieved = [];
 
-      if (data is List) {
-        retrieved.addAll(data);
-      } else if (data is Map) {
-        final results = data['results'];
-
-        if (results is List) {
-          retrieved.addAll(results);
-        }
+      if (data is Map && data['incidents'] is List) {
+        retrieved.addAll(data['incidents'] as List);
       }
 
       // Keep pending and failed incidents visible while they wait for a
       // successful Django synchronization.
       final pending = await _localDatabase.getPendingIncidents();
-      final remoteIds = retrieved
-          .whereType<Map>()
-          .map((item) => item['id']?.toString())
-          .whereType<String>()
-          .toSet();
+      final remoteIds = <String>{};
+      for (final item in retrieved.whereType<Map>()) {
+        for (final key in ['id', 'client_event_id']) {
+          final id = item[key]?.toString();
+          if (id != null && id.isNotEmpty) remoteIds.add(id);
+        }
+      }
       retrieved.addAll(
         pending.where((item) {
           final id = item['client_event_id']?.toString();
@@ -398,7 +334,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         await _incidentSync.synchronizePendingAudio(
           upload: widget.apiService.uploadIncidentAudio,
         );
-        await _notifySynchronizedIncidents();
       }
       final result = <String, dynamic>{
         'success': synchronized,
@@ -488,6 +423,15 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         fileName: metadata['filename']?.toString() ?? 'sos-audio.wav',
         mimeType: metadata['mime_type']?.toString() ?? 'audio/wav',
       );
+      final transferId = metadata['transfer_id']?.toString();
+      if (transferId != null && transferId.isNotEmpty) {
+        try {
+          await _bleService.acknowledgeAudioTransfer(transferId: transferId);
+        } catch (_) {
+          // The recording is already safely stored locally; it remains
+          // eligible for retry if the BLE acknowledgement is interrupted.
+        }
+      }
 
       // Audio can arrive after the incident has already synchronized. Attach it
       // explicitly so it becomes eligible for upload in either arrival order.
@@ -507,34 +451,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         await _incidentSync.synchronizePendingAudio(
           upload: widget.apiService.uploadIncidentAudio,
         );
-        final syncedIncident = await _localDatabase.getIncident(clientEventId);
-        final syncedServerId = syncedIncident?['server_incident_id']
-            ?.toString();
-        if (syncedServerId != null && syncedServerId.isNotEmpty) {
-          final protectedResult = await _protectedMedia.uploadRecording(
-            incidentId: syncedServerId,
-            bytes: List<int>.from(_audioBytes),
-            fileName: metadata['filename']?.toString() ?? 'sos-audio.wav',
-            mimeType: metadata['mime_type']?.toString() ?? 'audio/wav',
-          );
-          if (protectedResult['success'] == true) {
-            await _localDatabase.markProtectedMediaUploaded(
-              clientEventId: clientEventId,
-            );
-            final acknowledgements = protectedResult['acknowledgements'];
-            if (acknowledgements is Map &&
-                (acknowledgements['evidence_hash_calculated'] == true ||
-                    acknowledgements['hash_calculated'] == true)) {
-              await _localDatabase.markEvidenceHashCalculated(
-                clientEventId: clientEventId,
-                hash:
-                    (acknowledgements['evidence_hash'] ??
-                            acknowledgements['sha256'])
-                        ?.toString(),
-              );
-            }
-          }
-        }
       }
       if (mounted) await _loadIncidents();
     } finally {
@@ -624,8 +540,20 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   }
 
   Future<void> _openEvidenceComposer() async {
+    List<TrustedContact> trustedContacts;
+    try {
+      trustedContacts = await _notifications.getTrustedContacts();
+    } catch (error) {
+      if (mounted) {
+        _showMessage('Could not load trusted contacts: $error');
+      }
+      return;
+    }
+    if (!mounted) return;
+
     final messageController = TextEditingController();
     String shareWith = 'authorities';
+    final selectedContactIds = <int>{};
     PlatformFile? selectedFile;
     Uint8List? selectedFileBytes;
     final formKey = GlobalKey<FormState>();
@@ -682,10 +610,41 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                         child: Text('Authorities and trusted contacts'),
                       ),
                     ],
-                    onChanged: (value) => setDialogState(
-                      () => shareWith = value ?? 'authorities',
-                    ),
+                    onChanged: (value) => setDialogState(() {
+                      shareWith = value ?? 'authorities';
+                      if (shareWith == 'authorities') {
+                        selectedContactIds.clear();
+                      }
+                    }),
                   ),
+                  if (shareWith != 'authorities') ...[
+                    const SizedBox(height: 8),
+                    if (trustedContacts.isEmpty)
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Add a trusted contact before sharing with contacts.',
+                        ),
+                      )
+                    else
+                      ...trustedContacts.map((contact) {
+                        final id = int.tryParse(contact.id ?? '');
+                        if (id == null) return const SizedBox.shrink();
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: selectedContactIds.contains(id),
+                          title: Text(contact.name),
+                          subtitle: Text(contact.phoneNumber),
+                          onChanged: (selected) => setDialogState(() {
+                            if (selected == true) {
+                              selectedContactIds.add(id);
+                            } else {
+                              selectedContactIds.remove(id);
+                            }
+                          }),
+                        );
+                      }),
+                  ],
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -755,14 +714,28 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                   _showMessage('Choose a file and enter a message.');
                   return;
                 }
+                if (shareWith != 'authorities' && selectedContactIds.isEmpty) {
+                  _showMessage('Select at least one trusted contact.');
+                  return;
+                }
                 // Capture the text before the dialog closes, because the
                 // controller is disposed once the dialog future completes.
                 final messageText = messageController.text;
+                final selectedContacts = trustedContacts
+                    .where(
+                      (contact) => selectedContactIds.contains(
+                        int.tryParse(contact.id ?? ''),
+                      ),
+                    )
+                    .toList();
+                final file = selectedFile!;
+                final fileBytes = selectedFileBytes!;
+                final selectedShareWith = shareWith;
                 Navigator.pop(dialogContext);
                 _showMessage('Uploading evidence...');
                 final incident = await widget.apiService.createUserIncident(
                   description: messageText,
-                  shareWith: shareWith,
+                  shareWith: selectedShareWith,
                 );
                 final data = incident['data'];
                 final incidentId = data is Map
@@ -778,10 +751,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 }
                 final upload = await widget.apiService.uploadEvidenceVault(
                   incidentId: incidentId,
-                  bytes: selectedFileBytes!,
-                  fileName: selectedFile!.name,
-                  mimeType: _mimeTypeForFile(selectedFile!.extension),
-                  shareWith: shareWith,
+                  bytes: fileBytes,
+                  fileName: file.name,
+                  mimeType: _mimeTypeForFile(file.extension),
+                  shareWith: selectedShareWith,
+                  trustedContactIds: selectedContactIds.toList(),
                   message: messageText,
                 );
                 if (mounted) {
@@ -789,6 +763,15 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                     upload['message']?.toString() ?? 'Evidence submitted.',
                   );
                   await _loadIncidents();
+                  if (upload['success'] == true &&
+                      selectedContacts.isNotEmpty) {
+                    await _shareEvidenceBytes(
+                      fileName: file.name,
+                      mimeType: _mimeTypeForFile(file.extension),
+                      bytes: fileBytes,
+                      contacts: selectedContacts,
+                    );
+                  }
                 }
               },
               icon: const Icon(Icons.shield_outlined),
@@ -804,8 +787,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   Future<void> _addTrustedContact() async {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
-    final emailController = TextEditingController();
     var smsEnabled = true;
+    String? saveError;
     final formKey = GlobalKey<FormState>();
     final saved = await showDialog<bool>(
       context: context,
@@ -848,13 +831,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                       ? 'Enter a phone number'
                       : null,
                 ),
-                TextFormField(
-                  controller: emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email (optional)',
-                    prefixIcon: Icon(Icons.mail_outline),
-                  ),
-                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Receive SMS alerts'),
@@ -878,11 +854,15 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                   TrustedContact(
                     name: nameController.text,
                     phoneNumber: phoneController.text,
-                    email: emailController.text,
                     smsEnabled: smsEnabled,
                   ),
                 );
                 if (dialogContext.mounted) {
+                  if (result['success'] != true) {
+                    saveError =
+                        result['message']?.toString() ??
+                        'Could not save trusted contact.';
+                  }
                   Navigator.pop(dialogContext, result['success'] == true);
                 }
               },
@@ -894,8 +874,12 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     );
     nameController.dispose();
     phoneController.dispose();
-    emailController.dispose();
-    if (saved == true && mounted) _showMessage('Trusted contact saved.');
+    if (saved == true && mounted) {
+      _showMessage('Trusted contact saved.');
+      await _manageTrustedContacts();
+    } else if (saveError != null && mounted) {
+      _showMessage(saveError!);
+    }
   }
 
   void _showMessage(String message) {
@@ -1078,14 +1062,208 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     );
   }
 
+  Future<void> _openEvidenceFile(Map<String, dynamic> evidence) async {
+    final evidenceId = evidence['id']?.toString();
+    if (evidenceId == null || evidenceId.isEmpty) return;
+
+    final response = await widget.apiService.fetchEvidenceFile(evidenceId);
+    if (!mounted) return;
+    if (response['success'] != true) {
+      if (mounted) {
+        _showMessage(
+          response['message']?.toString() ?? 'Could not open evidence.',
+        );
+      }
+      return;
+    }
+
+    final bytes = List<int>.from(response['bytes'] as List);
+    final mimeType =
+        response['mime_type']?.toString() ??
+        evidence['mime_type']?.toString() ??
+        'application/octet-stream';
+    final fileName = evidence['original_filename']?.toString() ?? 'evidence';
+
+    if (mimeType.startsWith('video/')) {
+      try {
+        await const MethodChannel('com.salamasphere/share')
+            .invokeMethod<void>('viewMedia', {
+              'title': fileName,
+              'fileName': fileName,
+              'mimeType': mimeType,
+              'bytes': Uint8List.fromList(bytes),
+            });
+      } on PlatformException catch (error) {
+        if (mounted) _showMessage('Could not open video: ${error.message}');
+      } on MissingPluginException {
+        if (mounted) {
+          _showMessage('Video preview is unavailable on this device.');
+        }
+      }
+      return;
+    }
+
+    if (mimeType.startsWith('audio/')) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(fileName, maxLines: 2, overflow: TextOverflow.ellipsis),
+          content: const Text('Audio evidence is ready to play.'),
+          actions: [
+            TextButton.icon(
+              onPressed: () async {
+                await _audioPlayer.stop();
+                await _audioPlayer.play(BytesSource(Uint8List.fromList(bytes)));
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play'),
+            ),
+            TextButton.icon(
+              onPressed: () => _shareEvidenceBytes(
+                fileName: fileName,
+                mimeType: mimeType,
+                bytes: bytes,
+              ),
+              icon: const Icon(Icons.share_outlined),
+              label: const Text('Share'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (mounted) {
+      _showMessage('This evidence format cannot be previewed in the app.');
+    }
+  }
+
+  Future<void> _shareUploadedEvidence(Map<String, dynamic> evidence) async {
+    List<TrustedContact> contacts;
+    try {
+      contacts = await _notifications.getTrustedContacts();
+    } catch (error) {
+      if (mounted) _showMessage('Could not load trusted contacts: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (contacts.isEmpty) {
+      if (mounted) _showMessage('Add a trusted contact before sharing files.');
+      return;
+    }
+
+    final selected = <String>{};
+    final recipients = await showDialog<List<TrustedContact>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Share with trusted contacts'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: contacts.map((contact) {
+                final id = contact.id;
+                if (id == null) return const SizedBox.shrink();
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: selected.contains(id),
+                  title: Text(contact.name),
+                  subtitle: Text(contact.phoneNumber),
+                  onChanged: (value) => setDialogState(() {
+                    if (value == true) {
+                      selected.add(id);
+                    } else {
+                      selected.remove(id);
+                    }
+                  }),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.pop(
+                      dialogContext,
+                      contacts
+                          .where((contact) => selected.contains(contact.id))
+                          .toList(),
+                    ),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (recipients == null || recipients.isEmpty) return;
+
+    final result = await widget.apiService.fetchEvidenceFile(
+      evidence['id'].toString(),
+    );
+    if (result['success'] != true) {
+      if (mounted) {
+        _showMessage(
+          result['message']?.toString() ?? 'Could not download evidence.',
+        );
+      }
+      return;
+    }
+    await _shareEvidenceBytes(
+      fileName: evidence['original_filename']?.toString() ?? 'evidence',
+      mimeType: evidence['mime_type']?.toString() ?? 'application/octet-stream',
+      bytes: List<int>.from(result['bytes'] as List),
+      contacts: recipients,
+    );
+  }
+
+  Future<void> _shareEvidenceBytes({
+    required String fileName,
+    required String mimeType,
+    required List<int> bytes,
+    List<TrustedContact> contacts = const [],
+  }) async {
+    final recipientText = contacts.isEmpty
+        ? ''
+        : '\nFor: ${contacts.map((contact) => '${contact.name} (${contact.phoneNumber})').join(', ')}';
+    try {
+      await const MethodChannel('com.salamasphere/share')
+          .invokeMethod<void>('shareMedia', {
+            'title': 'SalamaSphere evidence',
+            'fileName': fileName,
+            'mimeType': mimeType,
+            'text': 'SalamaSphere shared evidence.$recipientText',
+            'bytes': Uint8List.fromList(bytes),
+          });
+    } on PlatformException catch (error) {
+      if (mounted) _showMessage('Could not share evidence: ${error.message}');
+    } on MissingPluginException {
+      if (mounted) _showMessage('File sharing is unavailable on this device.');
+    }
+  }
+
   Future<void> _shareAudio(String incidentId, List<int> bytes) async {
-    await const MethodChannel('com.salamasphere/share')
-        .invokeMethod<void>('shareAudio', {
-          'title': 'SalamaSphere incident recording $incidentId',
-          'fileName': 'salamasphere-$incidentId.wav',
-          'mimeType': 'audio/wav',
-          'bytes': Uint8List.fromList(bytes),
-        });
+    try {
+      await const MethodChannel('com.salamasphere/share')
+          .invokeMethod<void>('shareMedia', {
+            'title': 'SalamaSphere incident recording $incidentId',
+            'fileName': 'salamasphere-$incidentId.wav',
+            'mimeType': 'audio/wav',
+            'bytes': Uint8List.fromList(bytes),
+          });
+    } on PlatformException catch (error) {
+      if (mounted) _showMessage('Could not share recording: ${error.message}');
+    } on MissingPluginException {
+      if (mounted) _showMessage('File sharing is unavailable on this device.');
+    }
   }
 
   Future<void> _shareIncident(Map<String, dynamic> incident) async {
@@ -1139,7 +1317,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     _audioMetadataSubscription?.cancel();
     _audioChunkSubscription?.cancel();
     _audioPlayer.dispose();
-    _protectedMedia.dispose();
     _connectivitySubscription?.cancel();
     _bleService.dispose();
     super.dispose();
@@ -1542,6 +1719,52 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                           : 'No wearable audio attached.',
                       color: hasAudio ? _brand : Colors.black45,
                     ),
+                    if (incident['evidence'] is List)
+                      ...((incident['evidence'] as List).whereType<Map>().map((
+                        item,
+                      ) {
+                        final evidence = Map<String, dynamic>.from(item);
+                        final filename = _field(evidence, [
+                          'original_filename',
+                        ], fallback: 'Evidence file');
+                        final type = evidence['evidence_type']?.toString();
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            type == 'video'
+                                ? Icons.videocam_outlined
+                                : type == 'audio'
+                                ? Icons.audiotrack
+                                : Icons.attach_file,
+                            color: _brand,
+                          ),
+                          title: Text(
+                            filename,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '${type ?? 'file'} · '
+                            '${evidence['verification_status'] ?? 'uploaded'}',
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (action) {
+                              if (action == 'view') {
+                                _openEvidenceFile(evidence);
+                              } else {
+                                _shareUploadedEvidence(evidence);
+                              }
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(value: 'view', child: Text('View')),
+                              PopupMenuItem(
+                                value: 'share',
+                                child: Text('Share with contacts'),
+                              ),
+                            ],
+                          ),
+                        );
+                      })),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 4,

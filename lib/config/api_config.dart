@@ -6,13 +6,15 @@ class ApiConfig {
   static const String currentUserEndpoint = '/api/accounts/me/';
   static const String registerEndpoint = '/api/accounts/register/';
   static const String incidentsEndpoint = '/api/incidents/';
+  static String incidentEvidenceEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/evidence/';
+  static String evidenceFileEndpoint(String evidenceId) =>
+      '/api/evidence/$evidenceId/file/';
+  static const String dashboardOverviewEndpoint = '/api/dashboard/overview/';
   static const String trustedContactsEndpoint = '/api/trusted-contacts/';
-  static const String notificationDeliveriesEndpoint =
-      '/api/notifications/deliveries/';
+  static const String notificationDeliveriesEndpoint = '/api/notifications/';
   static const String verificationDocumentsEndpoint =
       '/api/accounts/verification-documents/';
-  static const String evidenceVaultEndpoint = '/api/evidence-vault/';
-  static const String privateMediaEndpoint = '/api/accounts/private-media/';
 
   static const String adminVerificationDocumentsEndpoint =
       '/api/accounts/admin/verification-documents/';
@@ -23,14 +25,25 @@ class ApiConfig {
   static String adminVerificationDocumentDownloadEndpoint(int documentId) =>
       '${adminVerificationDocumentDetailEndpoint(documentId)}download/';
 
+  static const String adminUnassignedIncidentsEndpoint =
+      '/api/incidents/admin/unassigned/';
+  static const String adminIncidentAssignmentsEndpoint =
+      '/api/incidents/admin/assignments/';
+  static const String adminAssignableAuthoritiesEndpoint =
+      '/api/incidents/admin/assignments/available-authorities/';
+  static const String authorityPresenceEndpoint =
+      '/api/incidents/authority/presence/';
+  static String resolveAssignedIncidentEndpoint(String incidentId) =>
+      '/api/incidents/authority/assigned/$incidentId/resolve/';
+
+  static String notificationDetailEndpoint(String notificationId) =>
+      '$notificationDeliveriesEndpoint$notificationId/';
+
   static String incidentDetailEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/';
 
   static String incidentAudioEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/audio/';
-
-  static String incidentNotificationEndpoint(String incidentId) =>
-      '/api/incidents/$incidentId/notifications/';
 
   static String incidentFollowUpNotesEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/notes/';

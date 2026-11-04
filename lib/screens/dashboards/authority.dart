@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../services/api_service.dart';
+import '../../services/location_service.dart';
 import '../login_screen.dart';
 import '../assigned_cases_screen.dart';
 import '../incident_dashboard_screen.dart';
+import '../notification_inbox_screen.dart';
 
 class AuthorityDashboardScreen extends StatelessWidget {
   final ApiService apiService;
@@ -68,6 +70,57 @@ class AuthorityDashboardScreen extends StatelessWidget {
           username: username,
           role: 'authority',
         ),
+      ),
+    );
+  }
+
+  Future<void> _updateAvailability(
+    BuildContext context, {
+    required bool available,
+  }) async {
+    double? latitude;
+    double? longitude;
+    if (available) {
+      final location = await LocationService().captureLocation();
+      if (!context.mounted) return;
+      if (location == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Enable location permission and location services to become available.',
+            ),
+          ),
+        );
+        return;
+      }
+      latitude = location.latitude;
+      longitude = location.longitude;
+    }
+
+    final response = await apiService.updateAuthorityPresence(
+      isAvailable: available,
+      latitude: latitude,
+      longitude: longitude,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          response['success'] == true
+              ? available
+                    ? 'You are available for nearby case assignments.'
+                    : 'You are unavailable for new case assignments.'
+              : response['message']?.toString() ??
+                    'Could not update your availability.',
+        ),
+      ),
+    );
+  }
+
+  void _openNotifications(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NotificationInboxScreen(apiService: apiService),
       ),
     );
   }
@@ -183,12 +236,55 @@ class AuthorityDashboardScreen extends StatelessWidget {
             color: Colors.teal,
             onTap: () => _openIncidentDashboard(context),
           ),
+          Card(
+            margin: const EdgeInsets.only(bottom: 14),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      CircleAvatar(child: Icon(Icons.location_on_outlined)),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Case availability',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Share your current location when you are ready to receive nearby case assignments.',
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      FilledButton(
+                        onPressed: () =>
+                            _updateAvailability(context, available: true),
+                        child: const Text('Available'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () =>
+                            _updateAvailability(context, available: false),
+                        child: const Text('Unavailable'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
           _featureCard(
             icon: Icons.notifications_active,
-            title: 'SOS Alerts',
-            description: 'View alerts available to your authorized role.',
+            title: 'Notifications',
+            description: 'View incident, assignment, and resolution updates.',
             color: Colors.deepOrange,
-            onTap: () => _showComingSoon(context, 'SOS Alerts'),
+            onTap: () => _openNotifications(context),
           ),
           _featureCard(
             icon: Icons.account_circle,

@@ -15,6 +15,7 @@ class _AssignedCasesScreenState extends State<AssignedCasesScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   List<Map<String, dynamic>> _incidents = [];
+  final Set<String> _resolvingIncidentIds = {};
 
   @override
   void initState() {
@@ -155,6 +156,47 @@ class _AssignedCasesScreenState extends State<AssignedCasesScreen> {
     );
   }
 
+  Future<void> _resolveIncident(Map<String, dynamic> incident) async {
+    final incidentId = incident['id']?.toString();
+    if (incidentId == null || incidentId.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Resolve this case?'),
+        content: const Text(
+          'This will close the incident and notify the people involved.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Mark resolved'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _resolvingIncidentIds.add(incidentId));
+    final result = await widget.apiService.resolveAssignedIncident(incidentId);
+    if (!mounted) return;
+    setState(() => _resolvingIncidentIds.remove(incidentId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result['message']?.toString() ??
+              (result['success'] == true
+                  ? 'Case marked as resolved.'
+                  : 'Could not resolve this case.'),
+        ),
+      ),
+    );
+    if (result['success'] == true) await _loadIncidents();
+  }
+
   Widget _detail(String label, dynamic value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -177,65 +219,91 @@ class _AssignedCasesScreenState extends State<AssignedCasesScreen> {
     final status = _displayValue(incident['status'], fallback: 'Unknown');
     final isSos = incident['is_sos'] == true;
 
+    final incidentId = incident['id']?.toString() ?? '';
+    final isResolving = _resolvingIncidentIds.contains(incidentId);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        leading: CircleAvatar(
-          backgroundColor: isSos
-              ? Colors.red.withValues(alpha: 0.12)
-              : Colors.indigo.withValues(alpha: 0.12),
-          child: Icon(
-            isSos ? Icons.sos : Icons.folder_shared,
-            color: isSos ? Colors.red : Colors.indigo,
-          ),
-        ),
-        title: Text(
-          isSos ? 'SOS Incident' : 'Assigned Incident',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('ID: ${_displayValue(incident['id'])}'),
-              const SizedBox(height: 4),
-              Text('Received: ${_formatDate(incident['received_at'])}'),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            contentPadding: const EdgeInsets.all(16),
+            leading: CircleAvatar(
+              backgroundColor: isSos
+                  ? Colors.red.withValues(alpha: 0.12)
+                  : Colors.indigo.withValues(alpha: 0.12),
+              child: Icon(
+                isSos ? Icons.sos : Icons.folder_shared,
+                color: isSos ? Colors.red : Colors.indigo,
+              ),
+            ),
+            title: Text(
+              isSos ? 'SOS Incident' : 'Assigned Incident',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Chip(
-                    label: Text(threat.toUpperCase()),
-                    backgroundColor: _threatColor(threat)
-                        .withValues(alpha: 0.12),
-                    labelStyle: TextStyle(
-                      color: _threatColor(threat),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
+                  Text('ID: ${_displayValue(incident['id'])}'),
+                  const SizedBox(height: 4),
+                  Text('Received: ${_formatDate(incident['received_at'])}'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      Chip(
+                        label: Text(threat.toUpperCase()),
+                        backgroundColor: _threatColor(threat)
+                            .withValues(alpha: 0.12),
+                        labelStyle: TextStyle(
+                          color: _threatColor(threat),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                      Chip(label: Text(status.toUpperCase())),
+                    ],
                   ),
-                  Chip(label: Text(status.toUpperCase())),
+                  if ((incident['description'] ?? '')
+                      .toString()
+                      .trim()
+                      .isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      incident['description'].toString(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
-              if ((incident['description'] ?? '')
-                  .toString()
-                  .trim()
-                  .isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  incident['description'].toString(),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ],
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showIncidentDetails(incident),
           ),
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => _showIncidentDetails(incident),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: isResolving
+                    ? null
+                    : () => _resolveIncident(incident),
+                icon: isResolving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: const Text('Mark resolved'),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

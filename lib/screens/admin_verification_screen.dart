@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/authority_verification_document.dart';
 import '../services/api_service.dart';
@@ -18,6 +19,7 @@ class _AdminVerificationScreenState extends State<AdminVerificationScreen> {
   String? _errorMessage;
 
   List<AuthorityVerificationDocument> _documents = [];
+  final Set<int> _openingDocuments = {};
 
   @override
   void initState() {
@@ -159,6 +161,61 @@ class _AdminVerificationScreenState extends State<AdminVerificationScreen> {
 
     if (success) {
       await _loadDocuments();
+    }
+  }
+
+  Future<void> _viewDocument(AuthorityVerificationDocument document) async {
+    setState(() => _openingDocuments.add(document.id));
+    final result = await widget.apiService.fetchVerificationDocumentFile(
+      document.id,
+    );
+    if (!mounted) return;
+    setState(() => _openingDocuments.remove(document.id));
+
+    final bytes = result['bytes'];
+    if (result['success'] != true || bytes is! List<int> || bytes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['message']?.toString() ??
+                'Could not load the verification document.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final mimeType =
+        result['mime_type']?.toString() ?? 'application/octet-stream';
+    final extension = mimeType == 'application/pdf'
+        ? 'pdf'
+        : mimeType == 'image/png'
+        ? 'png'
+        : 'jpg';
+    try {
+      await const MethodChannel('com.salamasphere/share')
+          .invokeMethod<void>('viewMedia', {
+            'title': 'Authority verification document',
+            'fileName': 'verification-${document.id}.$extension',
+            'mimeType': mimeType,
+            'bytes': bytes,
+          });
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.message ?? 'No compatible document viewer found.',
+          ),
+        ),
+      );
+    } on MissingPluginException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Document viewing is not available on this platform.'),
+        ),
+      );
     }
   }
 
@@ -336,6 +393,21 @@ class _AdminVerificationScreenState extends State<AdminVerificationScreen> {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
+                      OutlinedButton.icon(
+                        onPressed: _openingDocuments.contains(document.id)
+                            ? null
+                            : () => _viewDocument(document),
+                        icon: _openingDocuments.contains(document.id)
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.visibility_outlined),
+                        label: const Text('View document'),
+                      ),
                       FilledButton.icon(
                         onPressed: () => _reviewDocument(document, 'accepted'),
                         icon: const Icon(Icons.check_circle_outline),

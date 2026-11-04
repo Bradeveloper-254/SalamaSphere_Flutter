@@ -33,22 +33,6 @@ class NotificationService {
     return api.deleteTrustedContact(id);
   }
 
-  /// Asks the backend to apply the configured rules, create a privacy-safe
-  /// message, submit it through the configured Kenyan-capable provider, and
-  /// persist provider delivery IDs/statuses. The returned deliveries are not
-  /// treated as delivered unless the provider confirms delivery.
-  Future<Map<String, dynamic>> notifyIncident(String incidentId) async {
-    Map<String, dynamic> result = const {};
-    for (var attempt = 0; attempt < 3; attempt++) {
-      result = await api.dispatchIncidentNotifications(incidentId);
-      if (result['success'] == true) return result;
-      if (attempt < 2) {
-        await Future<void>.delayed(Duration(seconds: 1 << attempt));
-      }
-    }
-    return result;
-  }
-
   Future<Map<String, dynamic>> deliveryStatus(String incidentId) =>
       api.fetchNotificationDeliveries(incidentId);
 }

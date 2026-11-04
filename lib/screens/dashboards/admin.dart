@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../services/api_service.dart';
 import '../admin_account_management_screen.dart';
+import '../admin_case_assignment_screen.dart';
 import '../admin_verification_screen.dart';
 import '../incident_dashboard_screen.dart';
 import '../login_screen.dart';
+import '../notification_inbox_screen.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   final ApiService apiService;
@@ -28,6 +30,22 @@ class AdminDashboardScreen extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AdminAccountManagementScreen(apiService: apiService),
+      ),
+    );
+  }
+
+  void _openCaseAssignments(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AdminCaseAssignmentScreen(apiService: apiService),
+      ),
+    );
+  }
+
+  void _openNotifications(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NotificationInboxScreen(apiService: apiService),
       ),
     );
   }
@@ -174,6 +192,24 @@ class AdminDashboardScreen extends StatelessWidget {
                     'Review submitted verification documents '
                     'and record document review decisions.',
                 onTap: () => _openVerification(context),
+              ),
+
+              const SizedBox(height: 12),
+
+              _AdminActionCard(
+                icon: Icons.assignment_ind_outlined,
+                title: 'Assign Incidents',
+                description: 'Assign open incidents to the nearest approved authorities who are available and not handling another case.',
+                onTap: () => _openCaseAssignments(context),
+              ),
+
+              const SizedBox(height: 12),
+
+              _AdminActionCard(
+                icon: Icons.notifications_active_outlined,
+                title: 'Notifications',
+                description: 'Review updates about new incidents, case assignments, and resolutions.',
+                onTap: () => _openNotifications(context),
               ),
 
               const SizedBox(height: 12),
