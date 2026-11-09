@@ -23,7 +23,7 @@
     <!-- Location permission for older Android versions -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30" />
+        />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"
@@ -32,7 +32,8 @@
             android:label="salamasphere_mobile"
             android:name="${applicationName}"
             android:icon="@mipmap/ic_launcher"
-            android:usesCleartextTraffic="true">
+            android:allowBackup="false"
+            android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -76,6 +77,10 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

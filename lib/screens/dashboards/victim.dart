@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/wearable_event.dart';
 import '../../services/api_service.dart';
@@ -68,6 +69,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   StreamSubscription<Map<String, dynamic>>? _audioMetadataSubscription;
   StreamSubscription<List<int>>? _audioChunkSubscription;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  StreamSubscription<bool>? _bleConnectionSubscription;
+  StreamSubscription<Object>? _bleErrorSubscription;
 
   bool _connectingWearable = false;
   bool _wearableConnected = false;
@@ -80,10 +83,13 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   final List<int> _audioBytes = <int>[];
   bool _recordingComplete = false;
   bool _audioSaveInProgress = false;
+  String? _activeWearableEventId;
+  final Set<String> _requestedAudioEventIds = <String>{};
 
   // Prevent the same event notification from being processed
   // more than once during this screen session.
   final Set<String> _processedEventIds = <String>{};
+  final Set<String> _sessionNotificationKeys = <String>{};
 
   @override
   void initState() {
@@ -115,7 +121,28 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     await _incidentSync.synchronizePendingAudio(
       upload: widget.apiService.uploadIncidentAudio,
     );
+    await _deleteUploadedWearableRecordings();
     if (mounted) await _loadIncidents();
+  }
+
+  Future<void> _deleteUploadedWearableRecordings() async {
+    if (!_bleService.isConnected) return;
+    for (final incident in await _localDatabase.getAllIncidents()) {
+      final clientEventId = incident['client_event_id']?.toString();
+      final description = incident['description']?.toString() ?? '';
+      if (clientEventId == null ||
+          !description.startsWith('Wearable SOS event: ')) {
+        continue;
+      }
+      final audio = await _localDatabase.getIncidentAudio(clientEventId);
+      if (audio?['upload_status'] != 'uploaded') continue;
+      final transferId = description.substring('Wearable SOS event: '.length);
+      try {
+        await _bleService.acknowledgeAudioTransfer(transferId: transferId);
+      } catch (_) {
+        // The SD-card copy remains available for a later reconnect.
+      }
+    }
   }
 
   Future<void> _loadIncidents() async {
@@ -262,6 +289,32 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
 
         _maybeSaveAndUploadAudio();
       });
+      _bleConnectionSubscription ??= _bleService.connectionStates.listen((
+        connected,
+      ) {
+        if (!mounted) return;
+        setState(() {
+          _wearableConnected = connected;
+          _wearableMessage = connected
+              ? 'Wearable connected. Waiting for SOS events.'
+              : 'Wearable disconnected. Reconnect to resume monitoring.';
+        });
+        if (connected) {
+          _addSessionNotification(
+            key: 'wearable-connected',
+            title: 'Wearable connected',
+            message: 'Your SalamaSphere wearable is connected to the app.',
+          );
+        }
+        if (!connected) _requestedAudioEventIds.clear();
+      });
+      _bleErrorSubscription ??= _bleService.errors.listen((error) {
+        _requestedAudioEventIds.remove(_activeWearableEventId);
+        if (!mounted) return;
+        setState(() {
+          _wearableMessage = 'Wearable communication error: $error';
+        });
+      });
 
       await _bleService.connectToWearable();
       if (!mounted) return;
@@ -283,20 +336,42 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   Future<void> _handleWearableEvent(WearableEvent event) async {
     if (!mounted) return;
 
-    if (_processedEventIds.contains(event.eventId)) {
+    final existing = await _localDatabase.findIncidentByWearableEventId(
+      event.eventId,
+    );
+    if (_processedEventIds.contains(event.eventId) || existing != null) {
+      _processedEventIds.add(event.eventId);
+      final clientEventId = existing?['client_event_id']?.toString();
+      if (clientEventId != null) {
+        _activeEventClientId = clientEventId;
+        _activeWearableEventId = event.eventId;
+        final audio = await _localDatabase.getIncidentAudio(clientEventId);
+        if (audio?['upload_status'] == 'uploaded') {
+          try {
+            await _bleService.acknowledgeAudioTransfer(
+              transferId: event.eventId,
+            );
+          } catch (_) {
+            // The recording will be offered again by the wearable on reconnect.
+          }
+        } else if (event.recordingStatus == 'SAVED' ||
+            event.recordingStatus == 'SAVED_PARTIAL') {
+          await _requestAudioForEvent(event.eventId);
+        }
+      }
       return;
     }
 
     _processedEventIds.add(event.eventId);
-
-    final location = await _locationService.captureLocation();
     final clientEventId = widget.apiService.clientEventIdFor(event.eventId);
     _activeEventClientId = clientEventId;
+    _activeWearableEventId = event.eventId;
     _audioBytes.clear();
     _audioTransferMetadata = null;
     _expectedAudioBytes = null;
     _recordingComplete = false;
 
+    final location = await _locationService.captureLocation();
     await _localDatabase.saveIncident(
       clientEventId: clientEventId,
       deviceIdentifier: event.deviceIdentifier,
@@ -311,13 +386,12 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       locationSource: location == null ? 'unavailable' : 'phone_gps',
     );
 
-    // Some firmware versions begin audio transfer automatically; newer
-    // versions wait for this explicit command. Either path is supported.
-    try {
-      await _bleService.requestAudioTransfer(transferId: event.eventId);
-    } catch (_) {
-      // The SOS incident remains valid when this optional characteristic is
-      // absent or the wearable has no recording for the event.
+    if (event.callRequested) {
+      unawaited(_offerTrustedContactCall());
+    }
+    if (event.recordingStatus == 'SAVED' ||
+        event.recordingStatus == 'SAVED_PARTIAL') {
+      await _requestAudioForEvent(event.eventId);
     }
 
     setState(() {
@@ -384,6 +458,79 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     }
   }
 
+  Future<void> _requestAudioForEvent(String eventId) async {
+    if (!_requestedAudioEventIds.add(eventId)) return;
+    try {
+      await _bleService.requestAudioTransfer(transferId: eventId);
+    } catch (_) {
+      _requestedAudioEventIds.remove(eventId);
+    }
+  }
+
+  Future<void> _offerTrustedContactCall() async {
+    try {
+      final contacts = (await _notifications.getTrustedContacts())
+          .where(
+            (contact) =>
+                contact.active && contact.phoneNumber.trim().isNotEmpty,
+          )
+          .toList();
+      if (!mounted) return;
+      if (contacts.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Add a trusted contact with a phone number to call.'),
+          ),
+        );
+        return;
+      }
+
+      final selected = await showDialog<TrustedContact>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('SOS call requested'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: contacts
+                  .map(
+                    (contact) => ListTile(
+                      leading: const Icon(Icons.call_outlined),
+                      title: Text(contact.name),
+                      subtitle: Text(contact.phoneNumber),
+                      onTap: () => Navigator.pop(dialogContext, contact),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Not now'),
+            ),
+          ],
+        ),
+      );
+      if (selected == null || !mounted) return;
+      final launched = await launchUrl(
+        Uri(scheme: 'tel', path: selected.phoneNumber.trim()),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the phone dialer.')),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start the SOS call flow: $error')),
+      );
+    }
+  }
+
   void _handleRecordingStatus(String status) {
     if (!mounted) return;
 
@@ -391,9 +538,10 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       _wearableMessage = 'Recording transfer: $status';
     });
 
-    // A "complete" status from the wearable only means that
-    // it finished sending. It does not prove every byte arrived.
-    // Completion must be verified against metadata and received bytes.
+    if ((status == 'SAVED' || status == 'SAVED_PARTIAL') &&
+        _activeWearableEventId != null) {
+      unawaited(_requestAudioForEvent(_activeWearableEventId!));
+    }
   }
 
   void _maybeSaveAndUploadAudio() {
@@ -423,16 +571,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         fileName: metadata['filename']?.toString() ?? 'sos-audio.wav',
         mimeType: metadata['mime_type']?.toString() ?? 'audio/wav',
       );
-      final transferId = metadata['transfer_id']?.toString();
-      if (transferId != null && transferId.isNotEmpty) {
-        try {
-          await _bleService.acknowledgeAudioTransfer(transferId: transferId);
-        } catch (_) {
-          // The recording is already safely stored locally; it remains
-          // eligible for retry if the BLE acknowledgement is interrupted.
-        }
-      }
-
+      _addSessionNotification(
+        key: 'wearable-audio-$clientEventId',
+        title: 'Wearable audio received',
+        message: 'Audio from your wearable was transferred to this app.',
+      );
       // Audio can arrive after the incident has already synchronized. Attach it
       // explicitly so it becomes eligible for upload in either arrival order.
       final incident = await _localDatabase.getIncident(clientEventId);
@@ -451,6 +594,13 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         await _incidentSync.synchronizePendingAudio(
           upload: widget.apiService.uploadIncidentAudio,
         );
+      }
+      final audio = await _localDatabase.getIncidentAudio(clientEventId);
+      final transferId = metadata['transfer_id']?.toString();
+      if (audio?['upload_status'] == 'uploaded' &&
+          transferId != null &&
+          transferId.isNotEmpty) {
+        await _bleService.acknowledgeAudioTransfer(transferId: transferId);
       }
       if (mounted) await _loadIncidents();
     } finally {
@@ -496,6 +646,63 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                             subtitle: Text(
                               '${contact.phoneNumber}\n'
                               '${contact.smsEnabled ? 'SMS alerts enabled' : 'SMS alerts disabled'}',
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Delete ${contact.name}',
+                              onPressed: contact.id == null
+                                  ? null
+                                  : () async {
+                                      final confirmed = await showDialog<bool>(
+                                        context: dialogContext,
+                                        builder: (confirmContext) =>
+                                            AlertDialog(
+                                              title: const Text(
+                                                'Delete trusted contact?',
+                                              ),
+                                              content: Text(
+                                                'Remove ${contact.name} '
+                                                'from your trusted contacts?',
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                        confirmContext,
+                                                        false,
+                                                      ),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                FilledButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                        confirmContext,
+                                                        true,
+                                                      ),
+                                                  child: const Text('Delete'),
+                                                ),
+                                              ],
+                                            ),
+                                      );
+                                      if (confirmed != true) return;
+                                      final result = await _notifications
+                                          .removeTrustedContact(contact.id!);
+                                      if (!dialogContext.mounted) return;
+                                      if (result['success'] == true) {
+                                        Navigator.pop(dialogContext);
+                                        _showMessage(
+                                          'Trusted contact deleted.',
+                                        );
+                                        await _manageTrustedContacts();
+                                      } else {
+                                        _showMessage(
+                                          result['message']?.toString() ?? 'Could not delete trusted contact.',
+                                        );
+                                      }
+                                    },
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: Colors.red,
+                              ),
                             ),
                           ),
                         )
@@ -732,10 +939,21 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 final fileBytes = selectedFileBytes!;
                 final selectedShareWith = shareWith;
                 Navigator.pop(dialogContext);
-                _showMessage('Uploading evidence...');
+                _showMessage('Getting your location...');
+                final location = await _locationService.captureLocation();
+                if (!mounted) return;
+                _showMessage(
+                  location == null
+                      ? 'Location unavailable. Uploading without coordinates.'
+                      : 'Uploading incident with your current location...',
+                );
                 final incident = await widget.apiService.createUserIncident(
                   description: messageText,
                   shareWith: selectedShareWith,
+                  latitude: location?.latitude,
+                  longitude: location?.longitude,
+                  locationAccuracy: location?.accuracy,
+                  locationSource: location == null ? null : 'mobile_gps',
                 );
                 final data = incident['data'];
                 final incidentId = data is Map
@@ -788,6 +1006,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     var smsEnabled = true;
+    var consentConfirmed = false;
+    var saving = false;
     String? saveError;
     final formKey = GlobalKey<FormState>();
     final saved = await showDialog<bool>(
@@ -824,7 +1044,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
                     labelText: 'Kenyan phone number',
-                    hintText: '+254 7XX XXX XXX',
+                    hintText: '0712 345 678 or +254 712 345 678',
                     prefixIcon: Icon(Icons.phone_outlined),
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
@@ -838,6 +1058,23 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                   onChanged: (value) =>
                       setDialogState(() => smsEnabled = value),
                 ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text(
+                    "I have this contact's permission to receive SOS alerts.",
+                  ),
+                  value: consentConfirmed,
+                  onChanged: (value) =>
+                      setDialogState(() => consentConfirmed = value ?? false),
+                ),
+                if (saveError != null)
+                  Text(
+                    saveError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -848,25 +1085,49 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
             ),
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: _brand),
-              onPressed: () async {
-                if (!(formKey.currentState?.validate() ?? false)) return;
-                final result = await _notifications.saveTrustedContact(
-                  TrustedContact(
-                    name: nameController.text,
-                    phoneNumber: phoneController.text,
-                    smsEnabled: smsEnabled,
-                  ),
-                );
-                if (dialogContext.mounted) {
-                  if (result['success'] != true) {
-                    saveError =
-                        result['message']?.toString() ??
-                        'Could not save trusted contact.';
-                  }
-                  Navigator.pop(dialogContext, result['success'] == true);
-                }
-              },
-              child: const Text('Save'),
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (!(formKey.currentState?.validate() ?? false)) return;
+                      if (smsEnabled && !consentConfirmed) {
+                        setDialogState(
+                          () => saveError = 'Confirm contact permission before enabling SOS SMS alerts.',
+                        );
+                        return;
+                      }
+                      setDialogState(() {
+                        saving = true;
+                        saveError = null;
+                      });
+                      final result = await _notifications.saveTrustedContact(
+                        TrustedContact(
+                          name: nameController.text,
+                          phoneNumber: normalizeKenyanPhoneNumber(
+                            phoneController.text,
+                          ),
+                          smsEnabled: smsEnabled,
+                          consentConfirmed: consentConfirmed,
+                        ),
+                      );
+                      if (!dialogContext.mounted) return;
+                      if (result['success'] == true) {
+                        Navigator.pop(dialogContext, true);
+                      } else {
+                        setDialogState(() {
+                          saving = false;
+                          saveError =
+                              result['message']?.toString() ??
+                              'Could not save trusted contact.';
+                        });
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save'),
             ),
           ],
         ),
@@ -890,6 +1151,27 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
+  }
+
+  void _addSessionNotification({
+    required String key,
+    required String title,
+    required String message,
+  }) {
+    if (!mounted || !_sessionNotificationKeys.add(key)) return;
+    setState(() {
+      _notificationsList = [
+        {
+          'id': key,
+          'title': title,
+          'message': message,
+          'is_read': false,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+        ..._notificationsList,
+      ];
+    });
+    _showMessage(title);
   }
 
   String _mimeTypeForFile(String? extension) {
@@ -1316,6 +1598,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     _recordingStatusSubscription?.cancel();
     _audioMetadataSubscription?.cancel();
     _audioChunkSubscription?.cancel();
+    _bleConnectionSubscription?.cancel();
+    _bleErrorSubscription?.cancel();
     _audioPlayer.dispose();
     _connectivitySubscription?.cancel();
     _bleService.dispose();

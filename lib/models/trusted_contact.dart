@@ -1,3 +1,14 @@
+String normalizeKenyanPhoneNumber(String value) {
+  final phone = value.replaceAll(RegExp(r'[\s()-]'), '');
+  if (phone.startsWith('+')) return phone;
+  if (RegExp(r'^254\d{9}$').hasMatch(phone)) return '+$phone';
+  if (RegExp(r'^0\d{9}$').hasMatch(phone)) {
+    return '+254${phone.substring(1)}';
+  }
+  if (RegExp(r'^[17]\d{8}$').hasMatch(phone)) return '+254$phone';
+  return phone;
+}
+
 class TrustedContact {
   final String? id;
   final String name;
@@ -7,6 +18,7 @@ class TrustedContact {
   final bool pushEnabled;
   final bool emailEnabled;
   final bool active;
+  final bool consentConfirmed;
 
   const TrustedContact({
     this.id,
@@ -17,6 +29,7 @@ class TrustedContact {
     this.pushEnabled = false,
     this.emailEnabled = false,
     this.active = true,
+    this.consentConfirmed = false,
   });
 
   factory TrustedContact.fromJson(Map<String, dynamic> json) {
@@ -30,6 +43,7 @@ class TrustedContact {
       pushEnabled: json['push_enabled'] == true,
       emailEnabled: json['email_enabled'] == true,
       active: (json['active'] ?? json['is_active'] ?? true) == true,
+      consentConfirmed: json['consent_confirmed'] == true,
     );
   }
 
@@ -41,5 +55,6 @@ class TrustedContact {
     // fields must not be sent as unknown serializer fields.
     'receive_sos_alerts': smsEnabled,
     'is_active': active,
+    'confirm_sos_consent': consentConfirmed,
   };
 }

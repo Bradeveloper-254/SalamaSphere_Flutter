@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -6,6 +8,7 @@ import 'package:salamasphere_mobile/services/local_database_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late Directory temporaryDirectory;
   late LocalDatabaseService databaseService;
 
   setUpAll(() {
@@ -14,10 +17,20 @@ void main() {
   });
 
   setUp(() async {
-    databaseService = LocalDatabaseService.instance;
-
-    // Initialize the database before each test.
+    temporaryDirectory = await Directory.systemTemp.createTemp(
+      'salamasphere_database_test_',
+    );
+    final path =
+        '${temporaryDirectory.path}${Platform.pathSeparator}salamasphere.db';
+    databaseService = LocalDatabaseService.forTesting(path);
     await databaseService.database;
+  });
+
+  tearDown(() async {
+    await databaseService.close();
+    if (await temporaryDirectory.exists()) {
+      await temporaryDirectory.delete(recursive: true);
+    }
   });
 
   test('Database opens successfully', () async {
@@ -39,9 +52,7 @@ void main() {
     final incidents = await databaseService.getAllIncidents();
 
     expect(
-      incidents.any(
-        (incident) => incident['client_event_id'] == eventId,
-      ),
+      incidents.any((incident) => incident['client_event_id'] == eventId),
       isTrue,
     );
   });
@@ -59,9 +70,7 @@ void main() {
     final pending = await databaseService.getPendingIncidents();
 
     expect(
-      pending.any(
-        (incident) => incident['client_event_id'] == eventId,
-      ),
+      pending.any((incident) => incident['client_event_id'] == eventId),
       isTrue,
     );
   });

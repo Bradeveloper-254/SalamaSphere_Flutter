@@ -1,19 +1,92 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class LocalDatabaseService {
   static final LocalDatabaseService instance = LocalDatabaseService._internal();
 
-  LocalDatabaseService._internal() : _testDatabasePath = null;
+  LocalDatabaseService._internal()
+    : _testDatabasePath = null,
+      _testEncryptionKey = null;
 
   // Allows tests to use a separate SQLite database file.
-  LocalDatabaseService.forTesting(this._testDatabasePath);
+  LocalDatabaseService.forTesting(
+    this._testDatabasePath, {
+    List<int>? encryptionKey,
+  }) : _testEncryptionKey = encryptionKey ?? List<int>.filled(32, 0x53);
 
   final String? _testDatabasePath;
+  final List<int>? _testEncryptionKey;
+  final AesGcm _cipher = AesGcm.with256bits();
+  Future<SecretKey>? _secretKeyFuture;
 
   Database? _database;
+
+  Future<SecretKey> get _secretKey => _secretKeyFuture ??= _loadSecretKey();
+
+  Future<SecretKey> _loadSecretKey() async {
+    final testKey = _testEncryptionKey;
+    if (testKey != null) return SecretKey(testKey);
+
+    const storage = FlutterSecureStorage();
+    const storageKey = 'salamasphere_incident_encryption_key_v1';
+    final encodedKey = await storage.read(key: storageKey);
+    if (encodedKey != null) {
+      final keyBytes = base64Decode(encodedKey);
+      if (keyBytes.length != 32) {
+        throw const FormatException(
+          'The stored incident encryption key is invalid.',
+        );
+      }
+      return SecretKey(keyBytes);
+    }
+
+    final generatedKey = await _cipher.newSecretKey();
+    final keyBytes = await generatedKey.extractBytes();
+    await storage.write(key: storageKey, value: base64Encode(keyBytes));
+    return SecretKey(keyBytes);
+  }
+
+  Future<Uint8List> _encryptBytes(List<int> cleartext) async {
+    final box = await _cipher.encrypt(cleartext, secretKey: await _secretKey);
+    return box.concatenation();
+  }
+
+  Future<Uint8List> _decryptBytes(List<int> encrypted) async {
+    final box = SecretBox.fromConcatenation(
+      encrypted,
+      nonceLength: 12,
+      macLength: 16,
+    );
+    return Uint8List.fromList(
+      await _cipher.decrypt(box, secretKey: await _secretKey),
+    );
+  }
+
+  Future<Uint8List> _encryptPayload(Map<String, Object?> payload) =>
+      _encryptBytes(utf8.encode(jsonEncode(payload)));
+
+  Future<Map<String, Object?>> _decodeIncidentRow(
+    Map<String, Object?> row,
+  ) async {
+    final result = Map<String, Object?>.from(row)..remove('encrypted_payload');
+    final encryptedPayload = row['encrypted_payload'];
+    if (encryptedPayload == null) return result;
+
+    final decoded = jsonDecode(
+      utf8.decode(
+        await _decryptBytes(List<int>.from(encryptedPayload as List)),
+      ),
+    );
+    if (decoded is! Map) {
+      throw const FormatException('Stored incident payload is invalid.');
+    }
+    return result..addAll(Map<String, Object?>.from(decoded));
+  }
 
   Future<Database> get database async {
     if (_database != null) {
@@ -36,7 +109,7 @@ class LocalDatabaseService {
 
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE incidents (
@@ -64,6 +137,7 @@ class LocalDatabaseService {
             server_acknowledged_at TEXT,
             retry_count INTEGER NOT NULL DEFAULT 0,
             last_sync_error TEXT,
+            encrypted_payload BLOB NOT NULL,
             created_at TEXT NOT NULL
           )
         ''');
@@ -155,6 +229,60 @@ class LocalDatabaseService {
             "ALTER TABLE incident_audio ADD COLUMN evidence_hash_status TEXT NOT NULL DEFAULT 'pending'",
           );
         }
+        if (oldVersion < 6) {
+          await db.execute(
+            'ALTER TABLE incidents ADD COLUMN encrypted_payload BLOB',
+          );
+          final incidents = await db.query('incidents');
+          for (final incident in incidents) {
+            final payload = <String, Object?>{
+              'device_identifier': incident['device_identifier'],
+              'event_type': incident['event_type'],
+              'threat_level': incident['threat_level'],
+              'description': incident['description'],
+              'captured_at': incident['captured_at'],
+              'latitude': incident['latitude'],
+              'longitude': incident['longitude'],
+              'location_accuracy': incident['location_accuracy'],
+              'location_captured_at': incident['location_captured_at'],
+              'location_source': incident['location_source'],
+              'created_at': incident['created_at'],
+            };
+            await db.update(
+              'incidents',
+              {
+                'encrypted_payload': await _encryptPayload(payload),
+                'device_identifier': '',
+                'event_type': '',
+                'threat_level': 'medium',
+                'description': null,
+                'captured_at': '1970-01-01T00:00:00.000Z',
+                'latitude': null,
+                'longitude': null,
+                'location_accuracy': null,
+                'location_captured_at': null,
+                'location_source': null,
+                'created_at': '1970-01-01T00:00:00.000Z',
+              },
+              where: 'local_id = ?',
+              whereArgs: [incident['local_id']],
+            );
+          }
+
+          final audioRows = await db.query(
+            'incident_audio',
+            columns: ['local_id', 'bytes'],
+          );
+          for (final audio in audioRows) {
+            final clearBytes = List<int>.from(audio['bytes'] as List);
+            await db.update(
+              'incident_audio',
+              {'bytes': await _encryptBytes(clearBytes)},
+              where: 'local_id = ?',
+              whereArgs: [audio['local_id']],
+            );
+          }
+        }
       },
     );
   }
@@ -183,9 +311,7 @@ class LocalDatabaseService {
     }
 
     final db = await database;
-
-    return db.insert('incidents', {
-      'client_event_id': clientEventId,
+    final payload = <String, Object?>{
       'device_identifier': deviceIdentifier,
       'event_type': eventType,
       'threat_level': threatLevel,
@@ -196,6 +322,21 @@ class LocalDatabaseService {
       'location_accuracy': locationAccuracy,
       'location_captured_at': locationCapturedAt?.toUtc().toIso8601String(),
       'location_source': locationSource,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+    return db.insert('incidents', {
+      'client_event_id': clientEventId,
+      'device_identifier': '',
+      'event_type': '',
+      'threat_level': 'medium',
+      'description': null,
+      'captured_at': '1970-01-01T00:00:00.000Z',
+      'latitude': null,
+      'longitude': null,
+      'location_accuracy': null,
+      'location_captured_at': null,
+      'location_source': null,
       'sync_status': 'pending',
       'sync_state': 'SAVED_LOCALLY',
       'metadata_ack_status': 'pending',
@@ -203,20 +344,32 @@ class LocalDatabaseService {
       'evidence_hash_status': 'pending',
       'notification_ack_status': 'pending',
       'full_sync_status': 'pending',
-      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'encrypted_payload': await _encryptPayload(payload),
+      'created_at': '1970-01-01T00:00:00.000Z',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<List<Map<String, Object?>>> getAllIncidents() async {
     final db = await database;
 
-    return db.query('incidents', orderBy: 'captured_at DESC');
+    final rows = await db.query('incidents', orderBy: 'local_id DESC');
+    final incidents = <Map<String, Object?>>[];
+    for (final row in rows) {
+      incidents.add(await _decodeIncidentRow(row));
+    }
+    incidents.sort(
+      (a, b) => DateTime.parse((b['captured_at'] ?? b['created_at']) as String)
+          .compareTo(
+            DateTime.parse((a['captured_at'] ?? a['created_at']) as String),
+          ),
+    );
+    return incidents;
   }
 
   Future<List<Map<String, Object?>>> getPendingIncidents() async {
     final db = await database;
 
-    return db.query(
+    final rows = await db.query(
       'incidents',
       where: "sync_state IN (?, ?, ?) OR sync_status IN (?, ?)",
       whereArgs: [
@@ -226,8 +379,19 @@ class LocalDatabaseService {
         'pending',
         'failed',
       ],
-      orderBy: 'captured_at ASC',
+      orderBy: 'local_id ASC',
     );
+    final incidents = <Map<String, Object?>>[];
+    for (final row in rows) {
+      incidents.add(await _decodeIncidentRow(row));
+    }
+    incidents.sort(
+      (a, b) => DateTime.parse((a['captured_at'] ?? a['created_at']) as String)
+          .compareTo(
+            DateTime.parse((b['captured_at'] ?? b['created_at']) as String),
+          ),
+    );
+    return incidents;
   }
 
   Future<int> markIncidentSynced({
@@ -431,16 +595,24 @@ class LocalDatabaseService {
     required String source,
   }) async {
     final db = await database;
+    final rows = await db.query(
+      'incidents',
+      where: 'client_event_id = ?',
+      whereArgs: [clientEventId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return 0;
 
+    final payload = await _decodeIncidentRow(rows.first);
+    payload
+      ..['latitude'] = latitude
+      ..['longitude'] = longitude
+      ..['location_accuracy'] = accuracy
+      ..['location_captured_at'] = capturedAt.toUtc().toIso8601String()
+      ..['location_source'] = source;
     return db.update(
       'incidents',
-      {
-        'latitude': latitude,
-        'longitude': longitude,
-        'location_accuracy': accuracy,
-        'location_captured_at': capturedAt.toUtc().toIso8601String(),
-        'location_source': source,
-      },
+      {'encrypted_payload': await _encryptPayload(payload)},
       where: 'client_event_id = ?',
       whereArgs: [clientEventId],
     );
@@ -454,7 +626,18 @@ class LocalDatabaseService {
       whereArgs: [clientEventId],
       limit: 1,
     );
-    return rows.isEmpty ? null : rows.first;
+    return rows.isEmpty ? null : _decodeIncidentRow(rows.first);
+  }
+
+  Future<Map<String, Object?>?> findIncidentByWearableEventId(
+    String eventId,
+  ) async {
+    final incidents = await getAllIncidents();
+    final expectedDescription = 'Wearable SOS event: $eventId';
+    for (final incident in incidents) {
+      if (incident['description'] == expectedDescription) return incident;
+    }
+    return null;
   }
 
   Future<int> saveIncidentAudio({
@@ -464,10 +647,18 @@ class LocalDatabaseService {
     String mimeType = 'audio/wav',
   }) async {
     final db = await database;
+    final existing = await db.query(
+      'incident_audio',
+      columns: ['client_event_id'],
+      where: 'client_event_id = ?',
+      whereArgs: [clientEventId],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return 0;
 
     return db.insert('incident_audio', {
       'client_event_id': clientEventId,
-      'bytes': Uint8List.fromList(bytes),
+      'bytes': await _encryptBytes(bytes),
       'file_name': fileName,
       'mime_type': mimeType,
       'upload_status': 'pending',
@@ -505,16 +696,24 @@ class LocalDatabaseService {
       limit: 1,
     );
     if (rows.isEmpty || rows.first['bytes'] == null) return null;
-    return List<int>.from(rows.first['bytes'] as List);
+    return _decryptBytes(List<int>.from(rows.first['bytes'] as List));
   }
 
   Future<List<Map<String, Object?>>> getPendingIncidentAudio() async {
     final db = await database;
-    return db.query(
+    final rows = await db.query(
       'incident_audio',
       where: "upload_status IN ('pending', 'failed') AND server_incident_id IS NOT NULL",
       orderBy: 'created_at ASC',
     );
+    final pending = <Map<String, Object?>>[];
+    for (final row in rows) {
+      pending.add({
+        ...row,
+        'bytes': await _decryptBytes(List<int>.from(row['bytes'] as List)),
+      });
+    }
+    return pending;
   }
 
   Future<int> markAudioUploaded({required String clientEventId}) async {

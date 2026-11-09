@@ -120,7 +120,8 @@ class AuthorityDashboardScreen extends StatelessWidget {
   void _openNotifications(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => NotificationInboxScreen(apiService: apiService),
+        builder: (_) =>
+            NotificationInboxScreen(apiService: apiService, canCompose: true),
       ),
     );
   }

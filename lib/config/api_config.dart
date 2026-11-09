@@ -13,6 +13,10 @@ class ApiConfig {
   static const String dashboardOverviewEndpoint = '/api/dashboard/overview/';
   static const String trustedContactsEndpoint = '/api/trusted-contacts/';
   static const String notificationDeliveriesEndpoint = '/api/notifications/';
+  static const String notificationMessageRecipientsEndpoint =
+      '/api/notifications/messages/recipients/';
+  static const String notificationMessagesEndpoint =
+      '/api/notifications/messages/';
   static const String verificationDocumentsEndpoint =
       '/api/accounts/verification-documents/';
 

@@ -50,6 +50,9 @@ class IncidentSyncService {
         final acknowledgements = data is Map<String, dynamic>
             ? data
             : <String, dynamic>{};
+        final evidenceHash = acknowledgements['sha256_hash']?.toString();
+        final hashCalculated =
+            evidenceHash != null && evidenceHash.trim().isNotEmpty;
         await database.updateIncidentAcknowledgements(
           clientEventId: clientEventId,
           audioReceived: _ackBool(acknowledgements, const [
@@ -59,8 +62,14 @@ class IncidentSyncService {
           hashCalculated: _ackBool(acknowledgements, const [
             'evidence_hash_calculated',
             'hash_calculated',
-          ]),
+          ], fallback: hashCalculated),
         );
+        if (hashCalculated) {
+          await database.markEvidenceHashCalculated(
+            clientEventId: clientEventId,
+            hash: evidenceHash,
+          );
+        }
       } else {
         await database.markAudioUploadFailed(
           clientEventId: clientEventId,

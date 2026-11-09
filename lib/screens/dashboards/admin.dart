@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../services/api_service.dart';
@@ -8,7 +10,7 @@ import '../incident_dashboard_screen.dart';
 import '../login_screen.dart';
 import '../notification_inbox_screen.dart';
 
-class AdminDashboardScreen extends StatelessWidget {
+class AdminDashboardScreen extends StatefulWidget {
   final ApiService apiService;
   final String username;
 
@@ -18,55 +20,114 @@ class AdminDashboardScreen extends StatelessWidget {
     required this.username,
   });
 
-  void _openVerification(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AdminVerificationScreen(apiService: apiService),
-      ),
+  @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  Timer? _notificationRefreshTimer;
+  int _unreadNotificationCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshNotificationCount();
+    _notificationRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshNotificationCount(),
     );
+  }
+
+  @override
+  void dispose() {
+    _notificationRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshNotificationCount() async {
+    final response = await widget.apiService.fetchNotifications();
+    if (!mounted || response['success'] != true) return;
+
+    final data = response['data'];
+    final notifications = data is List
+        ? data
+        : data is Map && data['results'] is List
+        ? data['results'] as List
+        : null;
+    if (notifications == null) return;
+
+    final unreadCount = notifications
+        .whereType<Map>()
+        .where((notification) => notification['is_read'] != true)
+        .length;
+    if (unreadCount != _unreadNotificationCount) {
+      setState(() => _unreadNotificationCount = unreadCount);
+    }
+  }
+
+  void _openVerification(BuildContext context) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) =>
+                AdminVerificationScreen(apiService: widget.apiService),
+          ),
+        )
+        .then((_) => _refreshNotificationCount());
   }
 
   void _openAccountManagement(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AdminAccountManagementScreen(apiService: apiService),
-      ),
-    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) =>
+                AdminAccountManagementScreen(apiService: widget.apiService),
+          ),
+        )
+        .then((_) => _refreshNotificationCount());
   }
 
   void _openCaseAssignments(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AdminCaseAssignmentScreen(apiService: apiService),
-      ),
-    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) =>
+                AdminCaseAssignmentScreen(apiService: widget.apiService),
+          ),
+        )
+        .then((_) => _refreshNotificationCount());
   }
 
-  void _openNotifications(BuildContext context) {
-    Navigator.of(context).push(
+  Future<void> _openNotifications(BuildContext context) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => NotificationInboxScreen(apiService: apiService),
+        builder: (_) => NotificationInboxScreen(apiService: widget.apiService),
       ),
     );
+    await _refreshNotificationCount();
   }
 
   void _openIncidentDashboard(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => IncidentDashboardScreen(
-          apiService: apiService,
-          username: username,
-          role: 'admin',
-        ),
-      ),
-    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => IncidentDashboardScreen(
+              apiService: widget.apiService,
+              username: widget.username,
+              role: 'admin',
+            ),
+          ),
+        )
+        .then((_) => _refreshNotificationCount());
   }
 
   void _logout(BuildContext context) {
-    apiService.logout();
+    widget.apiService.logout();
 
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => LoginScreen(apiService: apiService)),
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(apiService: widget.apiService),
+      ),
       (route) => false,
     );
   }
@@ -83,6 +144,45 @@ class AdminDashboardScreen extends StatelessWidget {
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip:
+                'Notifications'
+                '${_unreadNotificationCount > 0 ? ', $_unreadNotificationCount unread' : ''}',
+            onPressed: () => _openNotifications(context),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.notifications_outlined),
+                if (_unreadNotificationCount > 0)
+                  Positioned(
+                    top: -5,
+                    right: -7,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadNotificationCount > 99
+                            ? '99+'
+                            : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           IconButton(
             tooltip: 'Log out',
             onPressed: () => _logout(context),
@@ -122,7 +222,7 @@ class AdminDashboardScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Welcome, $username',
+                      'Welcome, ${widget.username}',
                       style: const TextStyle(color: Colors.white, fontSize: 16),
                     ),
                     const SizedBox(height: 8),

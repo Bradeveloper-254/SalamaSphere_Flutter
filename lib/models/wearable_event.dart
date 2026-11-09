@@ -5,6 +5,7 @@ class WearableEvent {
   final DateTime timestamp;
   final int protocolVersion;
   final String? recordingStatus;
+  final bool callRequested;
 
   const WearableEvent({
     required this.eventId,
@@ -13,6 +14,7 @@ class WearableEvent {
     required this.timestamp,
     this.protocolVersion = 1,
     this.recordingStatus,
+    this.callRequested = false,
   });
 
   factory WearableEvent.fromJson(Map<String, dynamic> json) {
@@ -22,6 +24,7 @@ class WearableEvent {
     final rawTimestamp = json['timestamp'];
     final rawProtocolVersion = json['protocol_version'] ?? 1;
     final rawRecordingStatus = json['recording_status'];
+    final rawCallRequested = json['call_requested'] ?? false;
 
     if (eventId is! String ||
         eventId.isEmpty ||
@@ -30,6 +33,7 @@ class WearableEvent {
         eventType is! String ||
         eventType.isEmpty ||
         rawProtocolVersion is! int ||
+        rawCallRequested is! bool ||
         (rawTimestamp != null && rawTimestamp is! String) ||
         (rawRecordingStatus != null && rawRecordingStatus is! String)) {
       throw const FormatException('Invalid wearable event payload.');
@@ -50,6 +54,7 @@ class WearableEvent {
       timestamp: parsedTimestamp.toUtc(),
       protocolVersion: rawProtocolVersion,
       recordingStatus: rawRecordingStatus as String?,
+      callRequested: rawCallRequested,
     );
   }
 
@@ -60,6 +65,7 @@ class WearableEvent {
       'event_type': eventType,
       'timestamp': timestamp.toUtc().toIso8601String(),
       'protocol_version': protocolVersion,
+      'call_requested': callRequested,
       if (recordingStatus != null) 'recording_status': recordingStatus,
     };
   }

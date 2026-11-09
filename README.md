@@ -1,17 +1,40 @@
-# salamasphere_mobile
+# SalamaSphere Mobile
 
-A new Flutter project.
+Flutter Android client for SalamaSphere.
 
-## Getting Started
+## Incident flow
 
-This project is a starting point for a Flutter application.
+- Connect to the wearable over BLE and subscribe to SOS, recording status,
+  audio metadata, and audio data.
+- Recover stored recordings with `LIST`; transfer WAV files with `GET`, framed
+  chunks, cumulative `ACK`, and whole-file CRC-32 verification.
+- Capture phone GPS when the SOS is received, then persist the incident and
+  audio locally. Pending data is retried when connectivity returns.
+- Store incident details and audio bytes encrypted with AES-256-GCM. The
+  encryption key is held in Android secure storage; database schema version 6
+  encrypts existing unencrypted queued records during upgrade.
+- Submit incident JSON and WAV evidence to the HTTPS Django API using the
+  logged-in user's token. Keep the wearable's SD-card copy until the backend
+  confirms the audio upload.
+- When a wearable requests a call, offer the user a trusted contact and open
+  Android's dialer. The user must confirm/place the call; the ESP32 cannot
+  place telephone calls itself.
 
-A few resources to get you started if this is your first Flutter project:
+The wearable identifier must be active and owned by the authenticated user in
+the backend before its SOS can be accepted. Configure the production API in
+`lib/config/api_config.dart`.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Development checks
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --debug
+```
+
+BLE reception currently requires the app to be running and connected; this
+project does not implement an Android foreground service for monitoring while
+the app is terminated. Test GPS permission, BLE reliability, SOS delivery,
+audio integrity, and calls on the actual phone and wearable before relying on
+the prototype. It is not a guaranteed emergency-response service.

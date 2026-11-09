@@ -506,6 +506,21 @@ class ApiService {
     );
   }
 
+  Future<Map<String, dynamic>> fetchNotificationMessageRecipients() {
+    return _requestJson('GET', ApiConfig.notificationMessageRecipientsEndpoint);
+  }
+
+  Future<Map<String, dynamic>> sendNotificationMessage({
+    required int recipientId,
+    required String message,
+  }) {
+    return _requestJson(
+      'POST',
+      ApiConfig.notificationMessagesEndpoint,
+      body: {'recipient_id': recipientId, 'message': message},
+    );
+  }
+
   Future<Map<String, dynamic>> fetchAdminUnassignedIncidents() {
     return _requestJson('GET', ApiConfig.adminUnassignedIncidentsEndpoint);
   }
@@ -598,6 +613,10 @@ class ApiService {
   Future<Map<String, dynamic>> createUserIncident({
     required String description,
     required String shareWith,
+    double? latitude,
+    double? longitude,
+    double? locationAccuracy,
+    String? locationSource,
   }) async {
     if (_token == null) {
       return {
@@ -614,6 +633,13 @@ class ApiService {
       'is_sos': false,
       'threat_level': 'medium',
       'occurred_at': DateTime.now().toUtc().toIso8601String(),
+      if (latitude != null && longitude != null) ...{
+        'latitude': latitude,
+        'longitude': longitude,
+        ?(locationAccuracy == null ? null : 'location_accuracy_m'):
+            locationAccuracy,
+        ?(locationSource == null ? null : 'location_source'): locationSource,
+      },
     };
     return _requestJson('POST', ApiConfig.incidentsEndpoint, body: payload);
   }

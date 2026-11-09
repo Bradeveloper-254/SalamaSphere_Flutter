@@ -4,8 +4,13 @@ import '../services/api_service.dart';
 
 class NotificationInboxScreen extends StatefulWidget {
   final ApiService apiService;
+  final bool canCompose;
 
-  const NotificationInboxScreen({super.key, required this.apiService});
+  const NotificationInboxScreen({
+    super.key,
+    required this.apiService,
+    this.canCompose = false,
+  });
 
   @override
   State<NotificationInboxScreen> createState() =>
@@ -80,12 +85,139 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
     }
   }
 
+  Future<void> _composeMessage() async {
+    final response = await widget.apiService
+        .fetchNotificationMessageRecipients();
+    if (!mounted) return;
+    final rawRecipients = response['data'];
+    final recipients = rawRecipients is List
+        ? rawRecipients
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .where((row) => int.tryParse(row['id'].toString()) != null)
+              .toList()
+        : <Map<String, dynamic>>[];
+    if (response['success'] != true || recipients.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            response['message']?.toString() ??
+                'No administrators or assigned survivors are available.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final messageController = TextEditingController();
+    int? selectedRecipientId;
+    String? errorMessage;
+    final sent = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Send a message'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: selectedRecipientId,
+                  decoration: const InputDecoration(labelText: 'Recipient'),
+                  items: recipients.map((recipient) {
+                    final id = int.parse(recipient['id'].toString());
+                    return DropdownMenuItem<int>(
+                      value: id,
+                      child: Text(
+                        '${recipient['username']} '
+                        '(${recipient['role']})',
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) =>
+                      setDialogState(() => selectedRecipientId = value),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: messageController,
+                  minLines: 3,
+                  maxLines: 6,
+                  maxLength: 5000,
+                  decoration: const InputDecoration(
+                    labelText: 'Message',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (errorMessage != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      errorMessage!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (selectedRecipientId == null ||
+                    messageController.text.trim().isEmpty) {
+                  setDialogState(
+                    () => errorMessage =
+                        'Choose a recipient and enter a message.',
+                  );
+                  return;
+                }
+                final result = await widget.apiService.sendNotificationMessage(
+                  recipientId: selectedRecipientId!,
+                  message: messageController.text.trim(),
+                );
+                if (!dialogContext.mounted) return;
+                if (result['success'] == true) {
+                  Navigator.pop(dialogContext, true);
+                } else {
+                  setDialogState(
+                    () => errorMessage =
+                        result['message']?.toString() ??
+                        'Could not send the message.',
+                  );
+                }
+              },
+              child: const Text('Send'),
+            ),
+          ],
+        ),
+      ),
+    );
+    messageController.dispose();
+    if (sent == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Message sent.')));
+      await _loadNotifications();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
         actions: [
+          if (widget.canCompose)
+            IconButton(
+              tooltip: 'Send a message',
+              onPressed: _composeMessage,
+              icon: const Icon(Icons.send_outlined),
+            ),
           IconButton(
             tooltip: 'Refresh notifications',
             onPressed: _isLoading ? null : _loadNotifications,

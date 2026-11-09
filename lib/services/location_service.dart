@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 
 class IncidentLocation {
@@ -16,40 +18,40 @@ class IncidentLocation {
 
 class LocationService {
   Future<IncidentLocation?> captureLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      return null;
+    }
+
+    var permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return null;
+    }
+
+    final Position position;
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        return null;
-      }
-
-      var permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        return null;
-      }
-
-      final position = await Geolocator.getCurrentPosition(
+      position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 15),
         ),
       );
-
-      return IncidentLocation(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        accuracy: position.accuracy,
-        capturedAt: position.timestamp.toUtc(),
-      );
-    } catch (_) {
-      // An unavailable location must not prevent incident logging.
+    } on TimeoutException {
       return null;
     }
+
+    return IncidentLocation(
+      latitude: position.latitude,
+      longitude: position.longitude,
+      accuracy: position.accuracy,
+      capturedAt: position.timestamp.toUtc(),
+    );
   }
 }
