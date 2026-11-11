@@ -13,10 +13,10 @@
 //
 // BUTTON BEHAVIOUR (idle)
 //   press  < 1 s            -> rejected, nothing happens
-//   press  1 s .. 3 s       -> STANDARD SOS: event + recording
-//   press  3 s .. 5 s       -> ignored (dead zone, red LED blinks once)
-//   hold   >= 5 s           -> CALL SOS: event + recording + call request
-//                              (fires the moment 5 s is reached)
+//   press  1 s .. 10 s       -> STANDARD SOS: event + recording
+
+//   hold   >= 10 s           -> CALL SOS: event + recording + call request
+//                              (fires the moment 10 s is reached)
 // BUTTON BEHAVIOUR (while recording)
 //   any press >= 1 s        -> stop recording (and end the call request)
 //   press < 1 s             -> ignored
@@ -87,7 +87,7 @@
 
 #define DEVICE_NAME      "SalamaSphere"
 #define DEVICE_ID        "SALAMA-DEVICE-001"
-#define FIRMWARE_VERSION "1.4.0"
+#define FIRMWARE_VERSION "1.4.2"
 
 // ---------------- AUDIO CONFIGURATION -----------------------
 
@@ -102,8 +102,8 @@
 
 const unsigned long DEBOUNCE_MS      = 40;
 const unsigned long SHORT_PRESS_MS   = 1000;   // below this: rejected
-const unsigned long STANDARD_MAX_MS  = 3000;   // 1..3 s: standard SOS
-const unsigned long CALL_HOLD_MS     = 5000;   // >= 5 s: call SOS
+const unsigned long STANDARD_MAX_MS  = 10000;   // under 10s: standard SOS
+const unsigned long CALL_HOLD_MS     = 10000;   // >= 10 s: call SOS
 
 // ---------------- TRANSFER CONFIGURATION --------------------
 
@@ -112,7 +112,7 @@ const unsigned long CALL_HOLD_MS     = 5000;   // >= 5 s: call SOS
 #define PREFERRED_MTU         247
 #define MIN_MTU_FOR_TRANSFER  100
 
-#define WINDOW_SIZE           6
+#define WINDOW_SIZE           1     // Wait for each phone ACK before sending more.
 
 const unsigned long ACK_TIMEOUT_MS = 2000;
 const int MAX_STALLS = 5;
@@ -156,13 +156,13 @@ enum RecordResult {
 // ---------------- BLE UUIDS ----------------------------------
 
 #define SERVICE_UUID          "7b100001-5a1a-4d3e-9c2f-6b8e0d100001"
-#define DEVICE_ID_UUID        "7b100002-5a1a-4d3e-9c2f-6b8e0d100001"
-#define SOS_EVENT_UUID        "7b100003-5a1a-4d3e-9c2f-6b8e0d100001"
-#define RECORDING_STATUS_UUID "7b100004-5a1a-4d3e-9c2f-6b8e0d100001"
-#define AUDIO_METADATA_UUID   "7b100005-5a1a-4d3e-9c2f-6b8e0d100001"
-#define FILE_TRANSFER_UUID    "7b100006-5a1a-4d3e-9c2f-6b8e0d100001"
-#define TRANSFER_ACK_UUID     "7b100007-5a1a-4d3e-9c2f-6b8e0d100001"
-#define BATTERY_UUID          "7b100008-5a1a-4d3e-9c2f-6b8e0d100001"
+#define DEVICE_ID_UUID        "7b100002-5a1a-4d3e-9c2f-6b8e0d100002"
+#define SOS_EVENT_UUID        "7b100003-5a1a-4d3e-9c2f-6b8e0d100003"
+#define RECORDING_STATUS_UUID "7b100004-5a1a-4d3e-9c2f-6b8e0d100004"
+#define AUDIO_METADATA_UUID   "7b100005-5a1a-4d3e-9c2f-6b8e0d100005"
+#define FILE_TRANSFER_UUID    "7b100006-5a1a-4d3e-9c2f-6b8e0d100006"
+#define TRANSFER_ACK_UUID     "7b100007-5a1a-4d3e-9c2f-6b8e0d100007"
+#define BATTERY_UUID          "7b100008-5a1a-4d3e-9c2f-6b8e0d100008"
 
 // ---------------- BATTERY CONFIGURATION ---------------------
 // BATTERY_ADC_PIN: GPIO on a 2:1 divider from the battery (+).
@@ -970,7 +970,7 @@ SosMode interpretIdleGesture(ButtonAction action, unsigned long pressMs) {
 
   if (action == BTN_HOLD_REACHED) {
 
-    Serial.println("Hold >= 5 s: CALL SOS.");
+    Serial.println("Hold >= 10 s: CALL SOS.");
 
     return MODE_CALL;
   }
@@ -984,16 +984,18 @@ SosMode interpretIdleGesture(ButtonAction action, unsigned long pressMs) {
       return MODE_NONE;
     }
 
-    if (pressMs <= STANDARD_MAX_MS) {
+    // Safety net: if the loop was busy and the release was seen late,
+    // a press of 10 s or more still counts as a call.
+    if (pressMs >= CALL_HOLD_MS) {
 
-      Serial.printf("Press of %lu ms: STANDARD SOS.\n", pressMs);
+      Serial.printf("Press of %lu ms: CALL SOS.\n", pressMs);
 
-      return MODE_STANDARD;
+      return MODE_CALL;
     }
 
-    Serial.printf("Press of %lu ms is between 3 s and 5 s: ignored.\n", pressMs);
+    Serial.printf("Press of %lu ms: STANDARD SOS (recording).\n", pressMs);
 
-    gestureFeedback = true;
+    return MODE_STANDARD;
   }
 
   return MODE_NONE;
@@ -1321,7 +1323,7 @@ void generateSosEvent(SosMode mode, unsigned long holdDuration) {
     // Automatic BLE transfer to the app (newest recording first).
     autoPushPending = true;
     autoPushAttempts = 0;
-    autoPushNotBefore = millis() + 800;
+    autoPushNotBefore = millis();
 
   } else {
 
@@ -1583,7 +1585,15 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
     (unsigned long)crc
   );
 
-  publishTransferMessage(String(msg));
+  // Do not send binary packets unless the START header was accepted by
+  // the BLE stack. Otherwise the phone cannot know the file/chunk layout.
+  if (!publishTransferMessage(String(msg))) {
+    transferActive = false;
+    abortRequested = false;
+    file.close();
+    Serial.println("AUDIO TRANSFER ABORTED: START notification failed.");
+    return false;
+  }
 
   Serial.println();
   Serial.println("AUDIO TRANSFER STARTED");
@@ -1731,14 +1741,19 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
       (unsigned long)crc
     );
 
-    publishTransferMessage(String(msg));
+    if (publishTransferMessage(String(msg))) {
+      rememberPushed(eventId);
 
-    rememberPushed(eventId);
+      Serial.println();
+      Serial.println("AUDIO TRANSFER COMPLETED (waiting for DONE from the app)");
+    } else {
+      failReason = "COMPLETE_NOTIFY_FAILED";
+      success = false;
+    }
 
-    Serial.println();
-    Serial.println("AUDIO TRANSFER COMPLETED (waiting for DONE from the app)");
+  }
 
-  } else {
+  if (!success) {
 
     Serial.println();
     Serial.printf("AUDIO TRANSFER STOPPED: %s (resume offset %lu)\n",
@@ -2360,9 +2375,7 @@ void setup() {
     Serial.println("STATUS: INITIALIZATION FAILED (will retry automatically)");
   }
 
-  Serial.println("BLE advertising started.");
-  Serial.println("Press 1-3 s: standard SOS | hold 5 s+: SOS + call request.");
-  Serial.println("While recording, press >= 1 s to stop.");
+  Serial.println("Press 1 s to under 10 s: record | hold 10 s+: record + call request.");
 }
 
 // ============================================================
@@ -2435,9 +2448,11 @@ void loop() {
 
     listRecordings();
 
-    autoPushPending = true;
-    autoPushAttempts = 0;
-    autoPushNotBefore = millis() + 4000;
+    if (!autoPushPending) {
+      autoPushPending = true;
+      autoPushAttempts = 0;
+      autoPushNotBefore = millis() + 4000;
+    }
   }
 
   // ----- automatic transfer of pending recordings (newest first) -----

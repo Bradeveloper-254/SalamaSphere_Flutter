@@ -11,6 +11,8 @@ import 'package:http/http.dart' as http;
 import '../models/authority_verification_document.dart';
 import '../config/api_config.dart';
 
+double _coordinateForApi(double value) => double.parse(value.toStringAsFixed(6));
+
 String generateClientEventId() {
   final random = Random.secure();
 
@@ -554,8 +556,8 @@ class ApiService {
       ApiConfig.authorityPresenceEndpoint,
       body: {
         'is_available': isAvailable,
-        'latitude': latitude,
-        'longitude': longitude,
+        'latitude': latitude == null ? null : _coordinateForApi(latitude),
+        'longitude': longitude == null ? null : _coordinateForApi(longitude),
       },
     );
   }
@@ -634,8 +636,8 @@ class ApiService {
       'threat_level': 'medium',
       'occurred_at': DateTime.now().toUtc().toIso8601String(),
       if (latitude != null && longitude != null) ...{
-        'latitude': latitude,
-        'longitude': longitude,
+        'latitude': _coordinateForApi(latitude),
+        'longitude': _coordinateForApi(longitude),
         ?(locationAccuracy == null ? null : 'location_accuracy_m'):
             locationAccuracy,
         ?(locationSource == null ? null : 'location_source'): locationSource,
@@ -646,7 +648,9 @@ class ApiService {
 
   Future<Map<String, dynamic>> uploadEvidenceVault({
     required String incidentId,
-    required List<int> bytes,
+    List<int>? bytes,
+    Stream<List<int>>? fileStream,
+    int? fileLength,
     required String fileName,
     required String mimeType,
     required String shareWith,
@@ -657,6 +661,14 @@ class ApiService {
       return {
         'success': false,
         'message': 'Please log in before uploading evidence.',
+      };
+    }
+    final hasBytes = bytes != null;
+    final hasStream = fileStream != null && fileLength != null;
+    if (hasBytes == hasStream || (fileStream == null) != (fileLength == null)) {
+      return {
+        'success': false,
+        'message': 'Provide exactly one evidence file source.',
       };
     }
     final request =
@@ -685,18 +697,27 @@ class ApiService {
                   .toString(),
           })
           ..files.add(
-            http.MultipartFile.fromBytes(
-              'file',
-              bytes,
-              filename: fileName,
-              contentType: MediaType.parse(mimeType),
-            ),
+            hasStream
+                ? http.MultipartFile(
+                    'file',
+                    fileStream,
+                    fileLength,
+                    filename: fileName,
+                    contentType: MediaType.parse(mimeType),
+                  )
+                : http.MultipartFile.fromBytes(
+                    'file',
+                    bytes!,
+                    filename: fileName,
+                    contentType: MediaType.parse(mimeType),
+                  ),
           );
     try {
       final response = await _client
           .send(request)
-          .timeout(const Duration(seconds: 30));
-      final body = await http.Response.fromStream(response);
+          .timeout(const Duration(minutes: 5));
+      final body = await http.Response.fromStream(response)
+          .timeout(const Duration(minutes: 5));
       dynamic data;
       try {
         data = jsonDecode(body.body);
@@ -1018,8 +1039,8 @@ class ApiService {
     }
 
     if (latitude != null && longitude != null) {
-      payload['latitude'] = latitude;
-      payload['longitude'] = longitude;
+      payload['latitude'] = _coordinateForApi(latitude);
+      payload['longitude'] = _coordinateForApi(longitude);
       if (locationAccuracy != null) {
         payload['location_accuracy_m'] = locationAccuracy;
       }

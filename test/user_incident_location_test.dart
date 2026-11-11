@@ -24,8 +24,8 @@ void main() {
 
       if (request.url.path == '/api/incidents/') {
         final payload = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(payload['latitude'], -1.2864);
-        expect(payload['longitude'], 36.8172);
+        expect(payload['latitude'], -1.286412);
+        expect(payload['longitude'], 36.817212);
         expect(payload['location_accuracy_m'], 8.5);
         expect(payload['location_source'], 'mobile_gps');
         return http.Response(jsonEncode({'id': 'incident-123'}), 201);
@@ -44,8 +44,8 @@ void main() {
     final response = await apiService.createUserIncident(
       description: 'Test location report',
       shareWith: 'authorities',
-      latitude: -1.2864,
-      longitude: 36.8172,
+      latitude: -1.2864123456789,
+      longitude: 36.8172123456789,
       locationAccuracy: 8.5,
       locationSource: 'mobile_gps',
     );

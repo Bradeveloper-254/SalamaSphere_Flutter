@@ -79,12 +79,13 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   String _wearableMessage = 'Wearable not connected';
   Map<String, dynamic>? _audioTransferMetadata;
   int? _expectedAudioBytes;
-  String? _activeEventClientId;
   final List<int> _audioBytes = <int>[];
   bool _recordingComplete = false;
   bool _audioSaveInProgress = false;
   String? _activeWearableEventId;
   final Set<String> _requestedAudioEventIds = <String>{};
+  final Map<String, WearableEvent> _wearableEventsById =
+      <String, WearableEvent>{};
 
   // Prevent the same event notification from being processed
   // more than once during this screen session.
@@ -167,29 +168,64 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         retrieved.addAll(data['incidents'] as List);
       }
 
-      // Keep pending and failed incidents visible while they wait for a
-      // successful Django synchronization.
-      final pending = await _localDatabase.getPendingIncidents();
-      final remoteIds = <String>{};
-      for (final item in retrieved.whereType<Map>()) {
-        for (final key in ['id', 'client_event_id']) {
-          final id = item[key]?.toString();
-          if (id != null && id.isNotEmpty) remoteIds.add(id);
-        }
-      }
-      retrieved.addAll(
-        pending.where((item) {
-          final id = item['client_event_id']?.toString();
-          return id == null || !remoteIds.contains(id);
-        }),
-      );
-
+      // Keep local metadata and encrypted audio reachable even when the
+      // backend does not echo the wearable/client event identifiers.
+      final localIncidents = await _localDatabase.getAllIncidents();
       _localAudioByEventId.clear();
-      for (final incident in await _localDatabase.getAllIncidents()) {
+      for (final incident in localIncidents) {
         final clientId = incident['client_event_id']?.toString();
         if (clientId == null) continue;
         final audio = await _localDatabase.getIncidentAudio(clientId);
         if (audio != null) _localAudioByEventId[clientId] = audio;
+      }
+
+      for (final localIncident in localIncidents) {
+        final clientEventId =
+            localIncident['client_event_id']?.toString() ?? '';
+        if (clientEventId.isEmpty) continue;
+        final description = localIncident['description']?.toString() ?? '';
+        final wearableEventId = description.startsWith('Wearable SOS event: ')
+            ? description.substring('Wearable SOS event: '.length)
+            : '';
+        final serverIncidentId =
+            localIncident['server_incident_id']?.toString() ?? '';
+        final matchingIndex = retrieved.indexWhere((item) {
+          if (item is! Map) return false;
+          final remote = Map<String, dynamic>.from(item);
+          final remoteIds = [
+            remote['id'],
+            remote['incident_id'],
+            remote['uuid'],
+            remote['client_event_id'],
+            remote['wearable_event_id'],
+            remote['event_id'],
+          ].map((value) => value?.toString()).whereType<String>();
+          return remoteIds.contains(clientEventId) ||
+              (wearableEventId.isNotEmpty &&
+                  remoteIds.contains(wearableEventId)) ||
+              (serverIncidentId.isNotEmpty &&
+                  remoteIds.contains(serverIncidentId));
+        });
+        final incidentId = serverIncidentId.isNotEmpty
+            ? serverIncidentId
+            : clientEventId;
+        if (matchingIndex < 0) {
+          retrieved.add({
+            ...localIncident,
+            'id': incidentId,
+            'client_event_id': clientEventId,
+          });
+        } else {
+          final remote = Map<String, dynamic>.from(
+            retrieved[matchingIndex] as Map,
+          );
+          retrieved[matchingIndex] = {
+            ...remote,
+            ...localIncident,
+            'id': remote['id'] ?? incidentId,
+            'client_event_id': clientEventId,
+          };
+        }
       }
 
       setState(() {
@@ -289,25 +325,27 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
 
         _maybeSaveAndUploadAudio();
       });
-      _bleConnectionSubscription ??= _bleService.connectionStates.listen((
-        connected,
-      ) {
-        if (!mounted) return;
-        setState(() {
-          _wearableConnected = connected;
-          _wearableMessage = connected
-              ? 'Wearable connected. Waiting for SOS events.'
-              : 'Wearable disconnected. Reconnect to resume monitoring.';
-        });
-        if (connected) {
-          _addSessionNotification(
-            key: 'wearable-connected',
-            title: 'Wearable connected',
-            message: 'Your SalamaSphere wearable is connected to the app.',
-          );
-        }
-        if (!connected) _requestedAudioEventIds.clear();
-      });
+      _bleConnectionSubscription ??=
+          Stream<bool>.periodic(
+            const Duration(seconds: 1),
+            (_) => _bleService.isConnected,
+          ).distinct().listen((connected) {
+            if (!mounted) return;
+            setState(() {
+              _wearableConnected = connected;
+              _wearableMessage = connected
+                  ? 'Wearable connected. Waiting for SOS events.'
+                  : 'Wearable disconnected. Reconnect to resume monitoring.';
+            });
+            if (connected) {
+              _addSessionNotification(
+                key: 'wearable-connected',
+                title: 'Wearable connected',
+                message: 'Your SalamaSphere wearable is connected to the app.',
+              );
+            }
+            if (!connected) _requestedAudioEventIds.clear();
+          });
       _bleErrorSubscription ??= _bleService.errors.listen((error) {
         _requestedAudioEventIds.remove(_activeWearableEventId);
         if (!mounted) return;
@@ -335,15 +373,16 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   // Receive an SOS event and submit it to Django.
   Future<void> _handleWearableEvent(WearableEvent event) async {
     if (!mounted) return;
+    _wearableEventsById[event.eventId] = event;
 
     final existing = await _localDatabase.findIncidentByWearableEventId(
       event.eventId,
     );
     if (_processedEventIds.contains(event.eventId) || existing != null) {
       _processedEventIds.add(event.eventId);
+      _wearableEventsById.remove(event.eventId);
       final clientEventId = existing?['client_event_id']?.toString();
       if (clientEventId != null) {
-        _activeEventClientId = clientEventId;
         _activeWearableEventId = event.eventId;
         final audio = await _localDatabase.getIncidentAudio(clientEventId);
         if (audio?['upload_status'] == 'uploaded') {
@@ -354,8 +393,9 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           } catch (_) {
             // The recording will be offered again by the wearable on reconnect.
           }
-        } else if (event.recordingStatus == 'SAVED' ||
-            event.recordingStatus == 'SAVED_PARTIAL') {
+        } else if (audio == null &&
+            (event.recordingStatus == 'SAVED' ||
+                event.recordingStatus == 'SAVED_PARTIAL')) {
           await _requestAudioForEvent(event.eventId);
         }
       }
@@ -364,7 +404,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
 
     _processedEventIds.add(event.eventId);
     final clientEventId = widget.apiService.clientEventIdFor(event.eventId);
-    _activeEventClientId = clientEventId;
     _activeWearableEventId = event.eventId;
     _audioBytes.clear();
     _audioTransferMetadata = null;
@@ -385,6 +424,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       locationCapturedAt: location?.capturedAt,
       locationSource: location == null ? 'unavailable' : 'phone_gps',
     );
+    _wearableEventsById.remove(event.eventId);
 
     if (event.callRequested) {
       unawaited(_offerTrustedContactCall());
@@ -546,9 +586,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
 
   void _maybeSaveAndUploadAudio() {
     final expected = _expectedAudioBytes;
+    final transferId = _audioTransferMetadata?['transfer_id']?.toString();
 
     if (!_recordingComplete ||
-        _activeEventClientId == null ||
+        transferId == null ||
+        transferId.isEmpty ||
         _audioTransferMetadata == null ||
         expected == null ||
         expected <= 0 ||
@@ -557,14 +599,60 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       return;
     }
 
-    _saveAndUploadAudio(_activeEventClientId!);
+    unawaited(_saveAndUploadAudio(transferId));
   }
 
-  Future<void> _saveAndUploadAudio(String clientEventId) async {
+  Future<String> _ensureIncidentForAudioTransfer(String transferId) async {
+    final existing = await _localDatabase.findIncidentByWearableEventId(
+      transferId,
+    );
+    if (existing != null) {
+      _wearableEventsById.remove(transferId);
+      return existing['client_event_id']?.toString() ??
+          widget.apiService.clientEventIdFor(transferId);
+    }
+
+    final location = await _locationService.captureLocation();
+    final afterLocation = await _localDatabase.findIncidentByWearableEventId(
+      transferId,
+    );
+    if (afterLocation != null) {
+      _wearableEventsById.remove(transferId);
+      return afterLocation['client_event_id']?.toString() ??
+          widget.apiService.clientEventIdFor(transferId);
+    }
+
+    final clientEventId = widget.apiService.clientEventIdFor(transferId);
+    final event = _wearableEventsById[transferId];
+    final deviceIdentifier = _bleService.deviceIdentifier;
+    await _localDatabase.saveIncident(
+      clientEventId: clientEventId,
+      deviceIdentifier:
+          event?.deviceIdentifier ??
+          (deviceIdentifier.isEmpty
+              ? 'SalamaSphere wearable'
+              : deviceIdentifier),
+      eventType: event?.eventType ?? 'SOS',
+      capturedAt: event?.timestamp ?? DateTime.now().toUtc(),
+      threatLevel: 'high',
+      description: 'Wearable SOS event: $transferId',
+      latitude: location?.latitude,
+      longitude: location?.longitude,
+      locationAccuracy: location?.accuracy,
+      locationCapturedAt: location?.capturedAt,
+      locationSource: location == null ? 'unavailable' : 'phone_gps',
+    );
+    _wearableEventsById.remove(transferId);
+    return clientEventId;
+  }
+
+  Future<void> _saveAndUploadAudio(String transferId) async {
     if (_audioSaveInProgress) return;
     _audioSaveInProgress = true;
     final metadata = _audioTransferMetadata ?? const <String, dynamic>{};
     try {
+      final clientEventId = await _ensureIncidentForAudioTransfer(transferId);
+      _activeWearableEventId = transferId;
       await _localDatabase.saveIncidentAudio(
         clientEventId: clientEventId,
         bytes: List<int>.from(_audioBytes),
@@ -596,13 +684,16 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         );
       }
       final audio = await _localDatabase.getIncidentAudio(clientEventId);
-      final transferId = metadata['transfer_id']?.toString();
-      if (audio?['upload_status'] == 'uploaded' &&
-          transferId != null &&
-          transferId.isNotEmpty) {
+      if (audio?['upload_status'] == 'uploaded' && transferId.isNotEmpty) {
         await _bleService.acknowledgeAudioTransfer(transferId: transferId);
       }
       if (mounted) await _loadIncidents();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _wearableMessage = 'Could not save transferred audio: $error';
+        });
+      }
     } finally {
       _audioSaveInProgress = false;
     }
@@ -762,7 +853,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     String shareWith = 'authorities';
     final selectedContactIds = <int>{};
     PlatformFile? selectedFile;
-    Uint8List? selectedFileBytes;
     final formKey = GlobalKey<FormState>();
     await showDialog<void>(
       context: context,
@@ -857,26 +947,29 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: () async {
-                        final files = await FilePicker.pickFiles(
-                          type: FileType.custom,
-                          allowedExtensions: const [
-                            'aac',
-                            'amr',
-                            'mp3',
-                            'm4a',
-                            'wav',
-                            'mp4',
-                            'mov',
-                            'webm',
-                          ],
-                        );
-                        if (files.isNotEmpty) {
+                        try {
+                          final files = await FilePicker.pickFiles(
+                            type: FileType.custom,
+                            allowedExtensions: const [
+                              'aac',
+                              'amr',
+                              'mp3',
+                              'm4a',
+                              'wav',
+                              'mp4',
+                              'mov',
+                              'webm',
+                            ],
+                          );
+                          if (files.isEmpty) return;
                           final file = files.first;
-                          final bytes = await file.readAsBytes();
                           setDialogState(() {
                             selectedFile = file;
-                            selectedFileBytes = bytes;
                           });
+                        } catch (error) {
+                          if (mounted) {
+                            _showMessage('Could not select evidence: $error');
+                          }
                         }
                       },
                       icon: Icon(
@@ -917,12 +1010,29 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
               style: FilledButton.styleFrom(backgroundColor: _brand),
               onPressed: () async {
                 if (!(formKey.currentState?.validate() ?? false) ||
-                    selectedFileBytes == null) {
+                    selectedFile == null) {
                   _showMessage('Choose a file and enter a message.');
                   return;
                 }
                 if (shareWith != 'authorities' && selectedContactIds.isEmpty) {
                   _showMessage('Select at least one trusted contact.');
+                  return;
+                }
+                final file = selectedFile!;
+                int? fileLength;
+                try {
+                  fileLength = await file.length();
+                } catch (error) {
+                  if (mounted) {
+                    _showMessage(
+                      'Could not read the selected evidence file: $error',
+                    );
+                  }
+                  return;
+                }
+                if (!mounted || !dialogContext.mounted) return;
+                if (fileLength == null || fileLength <= 0) {
+                  _showMessage('Could not read the selected evidence file.');
                   return;
                 }
                 // Capture the text before the dialog closes, because the
@@ -935,8 +1045,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                       ),
                     )
                     .toList();
-                final file = selectedFile!;
-                final fileBytes = selectedFileBytes!;
                 final selectedShareWith = shareWith;
                 Navigator.pop(dialogContext);
                 _showMessage('Getting your location...');
@@ -969,7 +1077,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 }
                 final upload = await widget.apiService.uploadEvidenceVault(
                   incidentId: incidentId,
-                  bytes: fileBytes,
+                  fileStream: file.readAsByteStream(),
+                  fileLength: fileLength,
                   fileName: file.name,
                   mimeType: _mimeTypeForFile(file.extension),
                   shareWith: selectedShareWith,
@@ -986,7 +1095,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                     await _shareEvidenceBytes(
                       fileName: file.name,
                       mimeType: _mimeTypeForFile(file.extension),
-                      bytes: fileBytes,
+                      bytes: await file.readAsBytes(),
                       contacts: selectedContacts,
                     );
                   }
@@ -1588,8 +1697,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     final accuracyText = accuracy == null
         ? ''
         : ' (+/- ${double.tryParse(accuracy.toString())?.toStringAsFixed(0) ?? accuracy} m)';
-    return '${double.tryParse(latitude.toString())?.toStringAsFixed(6) ?? latitude}, '
-        '${double.tryParse(longitude.toString())?.toStringAsFixed(6) ?? longitude}$accuracyText';
+    return '${double.tryParse(latitude.toString()) ?? latitude}, '
+        '${double.tryParse(longitude.toString()) ?? longitude}$accuracyText';
   }
 
   @override

@@ -64,7 +64,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
         SnackBar(
           content: Text(
             response['message']?.toString() ??
-                'Could not find nearby available authorities.',
+                'Could not load available authorities.',
           ),
         ),
       );
@@ -79,7 +79,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
     if (authorities.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No available authority is nearby for this incident.'),
+          content: Text('No available authority can be assigned right now.'),
         ),
       );
       return;
@@ -94,7 +94,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              'Available authorities nearby',
+              'Available authorities',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
@@ -105,7 +105,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                 ),
                 title: Text(authority['username']?.toString() ?? 'Authority'),
                 subtitle: Text(
-                  '${authority['distance_km'] ?? '?'} km away'
+                  '${authority['distance_km'] == null ? 'Incident location unavailable' : '${authority['distance_km']} km away'}'
                   '${(authority['phone_number'] ?? '').toString().isEmpty ? '' : ' · ${authority['phone_number']}'}',
                 ),
                 onTap: () => Navigator.pop(context, authority),
@@ -188,9 +188,6 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                       itemBuilder: (context, index) {
                         final incident = _incidents[index];
                         final id = incident['id']?.toString() ?? '';
-                        final hasLocation =
-                            incident['latitude'] != null &&
-                            incident['longitude'] != null;
                         return Card(
                           child: Padding(
                             padding: const EdgeInsets.all(12),
@@ -217,11 +214,12 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                                     '${incident['description'] == null || incident['description'].toString().isEmpty ? '' : '\n${incident['description']}'}',
                                   ),
                                 ),
-                                if (!hasLocation)
+                                if (incident['latitude'] == null ||
+                                    incident['longitude'] == null)
                                   const Padding(
                                     padding: EdgeInsets.only(bottom: 8),
                                     child: Text(
-                                      'This incident has no location, so a nearby authority cannot be selected.',
+                                      'Incident location unavailable; eligible authorities can still be assigned without distance ranking.',
                                       style: TextStyle(color: Colors.orange),
                                     ),
                                   ),
@@ -229,8 +227,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                                   alignment: Alignment.centerRight,
                                   child: FilledButton.icon(
                                     onPressed:
-                                        !hasLocation ||
-                                            id.isEmpty ||
+                                        id.isEmpty ||
                                             _assigning.contains(id)
                                         ? null
                                         : () => _chooseAuthority(incident),
@@ -244,7 +241,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                                           )
                                         : const Icon(Icons.person_add_alt_1),
                                     label: const Text(
-                                      'Assign nearby authority',
+                                      'Assign authority',
                                     ),
                                   ),
                                 ),
