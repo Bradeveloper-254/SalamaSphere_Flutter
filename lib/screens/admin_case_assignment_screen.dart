@@ -1,6 +1,11 @@
+import 'dart:typed_data';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_service.dart';
+import '../services/location_service.dart';
 
 class AdminCaseAssignmentScreen extends StatefulWidget {
   final ApiService apiService;
@@ -17,6 +22,42 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
   String? _errorMessage;
   List<Map<String, dynamic>> _incidents = [];
   final Set<String> _assigning = {};
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _playIncidentAudio(String incidentId) async {
+    final result = await widget.apiService.fetchIncidentAudio(incidentId);
+    if (!mounted) return;
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['message']?.toString() ?? 'Could not load incident audio.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _audioPlayer.stop();
+      await _audioPlayer.play(
+        BytesSource(
+          Uint8List.fromList(List<int>.from(result['bytes'] as List)),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not play incident audio: $error')),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -188,6 +229,10 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                       itemBuilder: (context, index) {
                         final incident = _incidents[index];
                         final id = incident['id']?.toString() ?? '';
+                        final mapUri = googleMapsUriForCoordinates(
+                          incident['latitude'],
+                          incident['longitude'],
+                        );
                         return Card(
                           child: Padding(
                             padding: const EdgeInsets.all(12),
@@ -223,12 +268,56 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                                       style: TextStyle(color: Colors.orange),
                                     ),
                                   ),
+                                if (mapUri != null)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton.icon(
+                                      onPressed: () async {
+                                        final opened = await launchUrl(
+                                          mapUri,
+                                          mode: LaunchMode.externalApplication,
+                                        );
+                                        if (!opened && context.mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Unable to open the location in Google Maps.',
+                                                  ),
+                                                ),
+                                              );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.map_outlined),
+                                      label: const Text('Open in Google Maps'),
+                                    ),
+                                  ),
+                                if (incident['audio_available'] == true)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton.icon(
+                                      onPressed: id.isEmpty
+                                          ? null
+                                          : () => _playIncidentAudio(id),
+                                      icon: const Icon(Icons.play_arrow),
+                                      label: const Text('Play recorded audio'),
+                                    ),
+                                  )
+                                else
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'Recorded audio is not available yet.',
+                                      ),
+                                    ),
+                                  ),
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: FilledButton.icon(
                                     onPressed:
-                                        id.isEmpty ||
-                                            _assigning.contains(id)
+                                        id.isEmpty || _assigning.contains(id)
                                         ? null
                                         : () => _chooseAuthority(incident),
                                     icon: _assigning.contains(id)
@@ -240,9 +329,7 @@ class _AdminCaseAssignmentScreenState extends State<AdminCaseAssignmentScreen> {
                                             ),
                                           )
                                         : const Icon(Icons.person_add_alt_1),
-                                    label: const Text(
-                                      'Assign authority',
-                                    ),
+                                    label: const Text('Assign authority'),
                                   ),
                                 ),
                               ],

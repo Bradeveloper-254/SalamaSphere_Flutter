@@ -1663,6 +1663,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       'incident_id',
       'uuid',
     ], fallback: 'unknown');
+    final clientEventId = _field(incident, [
+      'client_event_id',
+      'wearable_event_id',
+      'event_id',
+    ], fallback: '');
     final threat = _field(incident, [
       'threat_level',
       'threat',
@@ -1671,14 +1676,117 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       'occurred_at',
       'created_at',
     ], fallback: 'unknown');
-    final location = _locationText(incident);
-    await const MethodChannel('com.salamasphere/share')
-        .invokeMethod<void>('shareText', {
-          'title': 'SalamaSphere incident $id',
-          'text':
-              'SalamaSphere incident\nID: $id\nThreat: $threat\n'
-              'Time: $occurred\nLocation: $location',
+    final nestedLocation = incident['location'];
+    final locationSource = nestedLocation is Map ? nestedLocation : incident;
+    final mapUri = googleMapsUriForCoordinates(
+      locationSource['latitude'] ?? incident['latitude'],
+      locationSource['longitude'] ?? incident['longitude'],
+    );
+    final location = mapUri?.toString() ?? 'Location unavailable';
+    final description = _field(incident, ['description'], fallback: '');
+    final text = StringBuffer(
+      'SalamaSphere incident\n'
+      'ID: $id\n'
+      'Threat: $threat\n'
+      'Time: $occurred\n'
+      'Location: $location',
+    );
+    if (description.isNotEmpty) {
+      text.write('\nDetails: $description');
+    }
+
+    dynamic evidenceItems = incident['evidence'];
+    if (evidenceItems is! List && id != 'unknown' && id != clientEventId) {
+      final response = await widget.apiService.fetchIncidentEvidence(id);
+      if (response['success'] != true) {
+        if (mounted) {
+          _showMessage(
+            response['message']?.toString() ??
+                'Could not load incident media to share.',
+          );
+        }
+        return;
+      }
+      evidenceItems = response['data'];
+    }
+
+    final mediaFiles = <Map<String, Object>>[];
+    var hasAudioEvidence = false;
+    if (evidenceItems is List) {
+      for (final item in evidenceItems) {
+        if (item is! Map ||
+            item['id'] == null ||
+            item['original_filename'] == null) {
+          if (mounted) {
+            _showMessage(
+              'Incident media details are incomplete; nothing shared.',
+            );
+          }
+          return;
+        }
+        final evidence = Map<String, dynamic>.from(item);
+        final evidenceId = evidence['id'].toString();
+        final filename = evidence['original_filename'].toString();
+        final mimeType =
+            evidence['mime_type']?.toString() ?? 'application/octet-stream';
+        final downloaded = await widget.apiService.fetchEvidenceFile(
+          evidenceId,
+        );
+        if (downloaded['success'] != true ||
+            downloaded['bytes'] is! List<int>) {
+          if (mounted) {
+            _showMessage(
+              'Could not retrieve $filename. No incident media was shared.',
+            );
+          }
+          return;
+        }
+        if (evidence['evidence_type'] == 'audio') hasAudioEvidence = true;
+        mediaFiles.add({
+          'fileName': filename,
+          'mimeType': downloaded['mime_type']?.toString() ?? mimeType,
+          'bytes': Uint8List.fromList(
+            List<int>.from(downloaded['bytes'] as List),
+          ),
         });
+      }
+    } else if (evidenceItems != null) {
+      if (mounted) {
+        _showMessage('Incident media list is invalid; nothing shared.');
+      }
+      return;
+    }
+
+    if (!hasAudioEvidence && clientEventId.isNotEmpty) {
+      final localAudio = _localAudioByEventId[clientEventId];
+      final bytes = await _localDatabase.getIncidentAudioBytes(clientEventId);
+      if (bytes != null && bytes.isNotEmpty) {
+        final fileName =
+            localAudio?['file_name']?.toString() ?? 'salamasphere-$id.wav';
+        mediaFiles.add({
+          'fileName': fileName,
+          'mimeType': localAudio?['mime_type']?.toString() ?? 'audio/wav',
+          'bytes': Uint8List.fromList(bytes),
+        });
+      }
+    }
+
+    try {
+      await const MethodChannel('com.salamasphere/share')
+          .invokeMethod<void>('shareIncident', {
+            'title': 'SalamaSphere incident $id',
+            'text': text.toString(),
+            'files': mediaFiles,
+          });
+    } on PlatformException catch (error) {
+      if (mounted) _showMessage('Could not share incident: ${error.message}');
+    } on MissingPluginException {
+      if (mounted) {
+        _showMessage('Incident sharing is unavailable on this device.');
+      }
+    } catch (error) {
+      if (mounted) _showMessage('Could not share incident: $error');
+    }
   }
 
   String _locationText(Map<String, dynamic> incident) {
@@ -1699,6 +1807,53 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         : ' (+/- ${double.tryParse(accuracy.toString())?.toStringAsFixed(0) ?? accuracy} m)';
     return '${double.tryParse(latitude.toString()) ?? latitude}, '
         '${double.tryParse(longitude.toString()) ?? longitude}$accuracyText';
+  }
+
+  Widget _locationMapLink(Map<String, dynamic> incident, String locationText) {
+    final nested = incident['location'];
+    final source = nested is Map ? nested : incident;
+    final uri = googleMapsUriForCoordinates(
+      source['latitude'] ?? incident['latitude'],
+      source['longitude'] ?? incident['longitude'],
+    );
+    if (uri == null) {
+      return _infoRow(Icons.location_on_outlined, locationText);
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 6, right: 8),
+          child: Icon(
+            Icons.location_on_outlined,
+            size: 18,
+            color: Colors.black54,
+          ),
+        ),
+        Expanded(
+          child: TextButton.icon(
+            onPressed: () async {
+              final launched = await launchUrl(
+                uri,
+                mode: LaunchMode.externalApplication,
+              );
+              if (!launched && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Unable to open the location in Google Maps.',
+                    ),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: const Text('Open incident location in Google Maps'),
+            style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -2104,7 +2259,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                     ),
                     if (date.isNotEmpty)
                       _infoRow(Icons.schedule, _formatDate(date)),
-                    _infoRow(Icons.location_on_outlined, location),
+                    _locationMapLink(incident, location),
                     _infoRow(
                       hasAudio ? Icons.audiotrack : Icons.audio_file_outlined,
                       hasAudio

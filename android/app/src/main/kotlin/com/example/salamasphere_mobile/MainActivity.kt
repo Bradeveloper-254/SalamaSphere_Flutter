@@ -4,14 +4,77 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.content.Intent
+import android.content.ClipData
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.ArrayList
+import java.util.UUID
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.salamasphere/share")
             .setMethodCallHandler { call, result ->
+            if (call.method == "shareIncident") {
+                val title = call.argument<String>("title") ?: "SalamaSphere incident"
+                val text = call.argument<String>("text") ?: title
+                val files = call.argument<List<Map<String, Any>>>("files") ?: emptyList()
+                try {
+                    val uris = ArrayList<android.net.Uri>()
+                    for (attachment in files) {
+                        val fileName = attachment["fileName"] as? String
+                            ?: throw IllegalArgumentException("A shared file has no file name.")
+                        val mimeType = attachment["mimeType"] as? String
+                            ?: "application/octet-stream"
+                        val bytes = attachment["bytes"] as? ByteArray
+                            ?: throw IllegalArgumentException("Shared file data is missing.")
+                        if (bytes.isEmpty()) {
+                            throw IllegalArgumentException("A shared file is empty.")
+                        }
+                        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                        val file = File(cacheDir, "incident-${UUID.randomUUID()}-$safeName")
+                        file.writeBytes(bytes)
+                        uris.add(
+                            FileProvider.getUriForFile(
+                                this,
+                                "$packageName.fileprovider",
+                                file
+                            )
+                        )
+                    }
+
+                    val intent = if (uris.isEmpty()) {
+                        Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, text)
+                        }
+                    } else {
+                        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                            type = "*/*"
+                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                            putExtra(Intent.EXTRA_TEXT, text)
+                            clipData = ClipData.newUri(
+                                contentResolver,
+                                title,
+                                uris.first()
+                            ).apply {
+                                uris.drop(1).forEach { addItem(ClipData.Item(it)) }
+                            }
+                        }
+                    }
+                    intent.putExtra(Intent.EXTRA_SUBJECT, title)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(Intent.createChooser(intent, title))
+                    result.success(null)
+                } catch (error: Exception) {
+                    result.error(
+                        "INCIDENT_SHARE_FAILED",
+                        error.message ?: "Could not prepare incident media for sharing.",
+                        null
+                    )
+                }
+                return@setMethodCallHandler
+            }
             if (call.method == "shareAudio" || call.method == "shareMedia" ||
                 call.method == "viewMedia") {
                 val title = call.argument<String>("title") ?: "SalamaSphere evidence"

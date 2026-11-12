@@ -4,8 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:salamasphere_mobile/services/api_service.dart';
+import 'package:salamasphere_mobile/services/location_service.dart';
 
 void main() {
+  test('Google Maps link uses validated incident coordinates', () {
+    expect(normalizeCoordinateForApi(-1.2864123456789), -1.286412);
+    final uri = googleMapsUriForCoordinates('-1.286412', '36.817212');
+
+    expect(uri?.host, 'www.google.com');
+    expect(uri?.path, '/maps/search/');
+    expect(uri?.queryParameters['api'], '1');
+    expect(uri?.queryParameters['query'], '-1.286412,36.817212');
+    expect(googleMapsUriForCoordinates(91, 36), isNull);
+    expect(googleMapsUriForCoordinates(-1, double.nan), isNull);
+  });
+
   test('user incident upload includes captured location', () async {
     final client = MockClient((request) async {
       if (request.url.path == '/api/health/') {

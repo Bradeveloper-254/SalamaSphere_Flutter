@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import 'local_database_service.dart';
+import 'location_service.dart';
 
 typedef ConnectivityChecker = Future<List<ConnectivityResult>> Function();
 
@@ -126,8 +127,12 @@ class IncidentSyncService {
           'description': incident['description'] ?? '',
           'occurred_at': incident['captured_at'],
           'location_captured_at': incident['location_captured_at'],
-          'latitude': latitude,
-          'longitude': longitude,
+          'latitude': latitude == null
+              ? null
+              : normalizeCoordinateForApi(latitude.toDouble()),
+          'longitude': longitude == null
+              ? null
+              : normalizeCoordinateForApi(longitude.toDouble()),
           'location_accuracy_m': incident['location_accuracy'],
           'location_source': incident['location_source'],
         };

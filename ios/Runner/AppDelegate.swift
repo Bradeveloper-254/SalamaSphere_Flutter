@@ -20,6 +20,49 @@ import UIKit
       binaryMessenger: engineBridge.binaryMessenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "shareIncident" {
+        guard let args = call.arguments as? [String: Any] else {
+          result(FlutterError(code: "INVALID_INCIDENT", message: "Incident details are missing.", details: nil))
+          return
+        }
+        let title = args["title"] as? String ?? "SalamaSphere incident"
+        let text = args["text"] as? String ?? title
+        let attachments = args["files"] as? [[String: Any]] ?? []
+        var urls: [URL] = []
+        do {
+          for attachment in attachments {
+            guard let fileName = attachment["fileName"] as? String,
+                  let bytes = attachment["bytes"] as? FlutterStandardTypedData,
+                  !bytes.data.isEmpty else {
+              throw NSError(
+                domain: "SalamaSphereShare",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "An incident attachment is invalid."]
+              )
+            }
+            let safeName = URL(fileURLWithPath: fileName).lastPathComponent
+            let url = FileManager.default.temporaryDirectory
+              .appendingPathComponent("incident-\(UUID().uuidString)-\(safeName)")
+            try bytes.data.write(to: url, options: .atomic)
+            urls.append(url)
+          }
+        } catch {
+          urls.forEach { try? FileManager.default.removeItem(at: $0) }
+          result(FlutterError(code: "INCIDENT_SHARE_FAILED", message: error.localizedDescription, details: nil))
+          return
+        }
+
+        var items: [Any] = urls.map { $0 as NSURL }
+        items.append(text)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+          urls.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
+        controller.popoverPresentationController?.sourceView = self?.window?.rootViewController?.view
+        self?.window?.rootViewController?.present(controller, animated: true)
+        result(nil)
+        return
+      }
       if call.method == "shareMedia" || call.method == "viewMedia" {
         guard let args = call.arguments as? [String: Any],
               let bytes = args["bytes"] as? FlutterStandardTypedData,

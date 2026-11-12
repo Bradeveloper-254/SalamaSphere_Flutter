@@ -1,6 +1,11 @@
+import 'dart:typed_data';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_service.dart';
+import '../services/location_service.dart';
 
 class IncidentDashboardScreen extends StatefulWidget {
   final ApiService apiService;
@@ -157,6 +162,7 @@ class _IncidentDashboardScreenState extends State<IncidentDashboardScreen> {
       isScrollControlled: true,
       builder: (context) => _IncidentDetailsSheet(
         incident: incident,
+        apiService: widget.apiService,
         role: widget.role,
         canAddNotes: _canAddNotes,
         isTrustedContact: _isTrustedContact,
@@ -335,6 +341,7 @@ class _IncidentDashboardScreenState extends State<IncidentDashboardScreen> {
 
 class _IncidentDetailsSheet extends StatefulWidget {
   final Map<String, dynamic> incident;
+  final ApiService apiService;
   final String role;
   final bool canAddNotes;
   final bool isTrustedContact;
@@ -343,6 +350,7 @@ class _IncidentDetailsSheet extends StatefulWidget {
 
   const _IncidentDetailsSheet({
     required this.incident,
+    required this.apiService,
     required this.role,
     required this.canAddNotes,
     required this.isTrustedContact,
@@ -356,6 +364,7 @@ class _IncidentDetailsSheet extends StatefulWidget {
 
 class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
   final _noteController = TextEditingController();
+  final AudioPlayer _audioPlayer = AudioPlayer();
   List<dynamic>? _notifications;
   bool _loadingNotifications = false;
 
@@ -372,7 +381,39 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
   @override
   void dispose() {
     _noteController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _playIncidentAudio() async {
+    final id = _value(['id', 'incident_id', 'uuid']);
+    if (id == 'Not available') return;
+    final result = await widget.apiService.fetchIncidentAudio(id);
+    if (!mounted) return;
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['message']?.toString() ?? 'Could not load incident audio.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _audioPlayer.stop();
+      await _audioPlayer.play(
+        BytesSource(
+          Uint8List.fromList(List<int>.from(result['bytes'] as List)),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not play incident audio: $error')),
+      );
+    }
   }
 
   Widget _detail(String label, String value) {
@@ -384,6 +425,44 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
           Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 3),
           SelectableText(value),
+        ],
+      ),
+    );
+  }
+
+  Widget _locationLink() {
+    final latitude = widget.incident['latitude'];
+    final longitude = widget.incident['longitude'];
+    final uri = googleMapsUriForCoordinates(latitude, longitude);
+    if (uri == null) {
+      return _detail('Location', _value(['location_display', 'location']));
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Location', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 3),
+          TextButton.icon(
+            onPressed: () async {
+              final opened = await launchUrl(
+                uri,
+                mode: LaunchMode.externalApplication,
+              );
+              if (!opened && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Unable to open the location in Google Maps.',
+                    ),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.map_outlined),
+            label: const Text('Open in Google Maps'),
+          ),
         ],
       ),
     );
@@ -411,6 +490,8 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
     final audioStatus = _value(
       ['audio_status', 'recording_status'],
       fallback: widget.incident['audio_url'] != null
+          ? 'Available'
+          : widget.incident['audio_available'] == true
           ? 'Available'
           : 'Not available',
     );
@@ -451,7 +532,7 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
                 'Receipt timestamp',
                 _value(['received_at', 'created_at']),
               ),
-              _detail('Location', _value(['location_display', 'location'])),
+              _locationLink(),
               _detail('Threat level', _value(['threat_level', 'risk_level'])),
               _detail('Audio recording', audioStatus),
               _detail('SHA-256', _value(['audio_sha256', 'evidence_sha256'])),
@@ -474,12 +555,14 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
               ),
               if (canAccessAudio &&
                   audioStatus.toLowerCase() != 'not available')
-                const Card(
+                Card(
                   child: ListTile(
                     leading: Icon(Icons.lock_outline),
-                    title: Text('Audio access is available'),
-                    subtitle: Text(
-                      'Use the victim private-media view to play or share the recording.',
+                    title: Text('Recorded audio is available'),
+                    subtitle: TextButton.icon(
+                      onPressed: _playIncidentAudio,
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Play recording'),
                     ),
                   ),
                 ),

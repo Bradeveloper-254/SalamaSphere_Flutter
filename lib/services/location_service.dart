@@ -3,6 +3,28 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
+double normalizeCoordinateForApi(double value) =>
+    double.parse(value.toStringAsFixed(6));
+
+Uri? googleMapsUriForCoordinates(Object? latitude, Object? longitude) {
+  final lat = double.tryParse(latitude?.toString() ?? '');
+  final lon = double.tryParse(longitude?.toString() ?? '');
+  if (lat == null ||
+      lon == null ||
+      !lat.isFinite ||
+      !lon.isFinite ||
+      lat < -90 ||
+      lat > 90 ||
+      lon < -180 ||
+      lon > 180) {
+    return null;
+  }
+  return Uri.https('www.google.com', '/maps/search/', {
+    'api': '1',
+    'query': '${lat.toStringAsFixed(6)},${lon.toStringAsFixed(6)}',
+  });
+}
+
 class IncidentLocation {
   final double latitude;
   final double longitude;

@@ -10,8 +10,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/authority_verification_document.dart';
 import '../config/api_config.dart';
-
-double _coordinateForApi(double value) => double.parse(value.toStringAsFixed(6));
+import 'location_service.dart';
 
 String generateClientEventId() {
   final random = Random.secure();
@@ -210,7 +209,7 @@ class ApiService {
         'status_code': null,
         'message':
             'Could not connect to SalamaSphere. '
-            'Check your internet connection and try again.',
+            'Check your internet connection and try again. offline mode not yet fully implemented',
       };
     }
   }
@@ -556,8 +555,12 @@ class ApiService {
       ApiConfig.authorityPresenceEndpoint,
       body: {
         'is_available': isAvailable,
-        'latitude': latitude == null ? null : _coordinateForApi(latitude),
-        'longitude': longitude == null ? null : _coordinateForApi(longitude),
+        'latitude': latitude == null
+            ? null
+            : normalizeCoordinateForApi(latitude),
+        'longitude': longitude == null
+            ? null
+            : normalizeCoordinateForApi(longitude),
       },
     );
   }
@@ -636,8 +639,8 @@ class ApiService {
       'threat_level': 'medium',
       'occurred_at': DateTime.now().toUtc().toIso8601String(),
       if (latitude != null && longitude != null) ...{
-        'latitude': _coordinateForApi(latitude),
-        'longitude': _coordinateForApi(longitude),
+        'latitude': normalizeCoordinateForApi(latitude),
+        'longitude': normalizeCoordinateForApi(longitude),
         ?(locationAccuracy == null ? null : 'location_accuracy_m'):
             locationAccuracy,
         ?(locationSource == null ? null : 'location_source'): locationSource,
@@ -782,6 +785,10 @@ class ApiService {
         'message': 'Could not retrieve evidence: $error',
       };
     }
+  }
+
+  Future<Map<String, dynamic>> fetchIncidentEvidence(String incidentId) {
+    return _requestJson('GET', ApiConfig.incidentEvidenceEndpoint(incidentId));
   }
 
   Future<Map<String, dynamic>> addIncidentFollowUpNote({
@@ -1039,8 +1046,8 @@ class ApiService {
     }
 
     if (latitude != null && longitude != null) {
-      payload['latitude'] = _coordinateForApi(latitude);
-      payload['longitude'] = _coordinateForApi(longitude);
+      payload['latitude'] = normalizeCoordinateForApi(latitude);
+      payload['longitude'] = normalizeCoordinateForApi(longitude);
       if (locationAccuracy != null) {
         payload['location_accuracy_m'] = locationAccuracy;
       }
