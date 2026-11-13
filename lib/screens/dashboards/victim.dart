@@ -450,11 +450,21 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           upload: widget.apiService.uploadIncidentAudio,
         );
       }
+      Map<String, dynamic>? savedIncident;
+      for (final incident in await _localDatabase.getAllIncidents()) {
+        if (incident['client_event_id'] == clientEventId) {
+          savedIncident = incident;
+          break;
+        }
+      }
+      final syncError = savedIncident?['last_sync_error']?.toString();
       final result = <String, dynamic>{
         'success': synchronized,
         'message': token == null
             ? 'SOS saved locally and is waiting for login.'
-            : 'Upload is pending until the backend is reachable.',
+            : syncError == null || syncError.isEmpty
+            ? 'Upload is pending until the backend is reachable.'
+            : 'Upload failed: $syncError',
       };
 
       if (!mounted) return;

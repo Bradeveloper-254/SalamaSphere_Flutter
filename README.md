@@ -20,9 +20,12 @@ Flutter Android client for SalamaSphere.
   Android's dialer. The user must confirm/place the call; the ESP32 cannot
   place telephone calls itself.
 
-The wearable identifier must be active and owned by the authenticated user in
-the backend before its SOS can be accepted. Configure the production API in
-`lib/config/api_config.dart`.
+Before syncing a queued wearable SOS, the app registers the wearable identifier
+to the signed-in account. Reconnects reuse an existing active registration; an
+identifier already owned by another account or marked inactive is rejected.
+After registration, a successful SOS creation queues SMS alerts for trusted
+contacts who are active and have confirmed SOS consent. Configure the production
+API in `lib/config/api_config.dart`.
 
 ## Development checks
 

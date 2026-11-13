@@ -88,6 +88,53 @@ void main() {
     service.dispose();
   });
 
+  test(
+    'device claim errors are retained and stop incident submission',
+    () async {
+      await saveIncident();
+
+      var incidentRequests = 0;
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/devices/register/') {
+          return http.Response(
+            jsonEncode({
+              'detail':
+                  'This wearable is already registered and cannot be claimed.',
+            }),
+            409,
+          );
+        }
+
+        incidentRequests++;
+        return http.Response(jsonEncode({'id': 'unexpected'}), 201);
+      });
+
+      final service = IncidentSyncService(
+        database: database,
+        client: mockClient,
+        connectivityChecker: () async => [ConnectivityResult.wifi],
+      );
+
+      expect(
+        await service.synchronizePendingIncidents(token: 'test-token'),
+        isFalse,
+      );
+      expect(incidentRequests, 0);
+
+      final incident = (await database.getAllIncidents()).single;
+      expect(incident['sync_status'], 'failed');
+      expect(
+        incident['last_sync_error'],
+        contains(
+          'Wearable registration failed (HTTP 409): '
+          'detail: This wearable is already registered',
+        ),
+      );
+
+      service.dispose();
+    },
+  );
+
   test('incident recovers after connectivity returns', () async {
     await saveIncident();
 
@@ -99,10 +146,17 @@ void main() {
 
       expect(request.headers['authorization'], 'Token test-token');
 
+      if (request.url.path == '/api/devices/register/') {
+        final payload = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(payload['device_identifier'], deviceIdentifier);
+        return http.Response(jsonEncode({'id': 'device-001'}), 201);
+      }
+
       final payload = jsonDecode(request.body) as Map<String, dynamic>;
 
       expect(payload['client_event_id'], eventId);
       expect(payload['device_identifier'], deviceIdentifier);
+      expect(request.url.path, '/api/incidents/');
 
       return http.Response(
         jsonEncode({'id': 'server-002'}),
@@ -138,7 +192,7 @@ void main() {
     );
 
     expect(onlineResult, isTrue);
-    expect(httpCalls, 1);
+    expect(httpCalls, 2);
 
     incidents = await database.getAllIncidents();
 
@@ -158,17 +212,21 @@ void main() {
   test('failed upload can be retried successfully', () async {
     await saveIncident();
 
-    var attempt = 0;
+    var incidentAttempts = 0;
     final submittedEventIds = <String>[];
 
     final mockClient = MockClient((request) async {
-      attempt++;
+      if (request.url.path == '/api/devices/register/') {
+        return http.Response(jsonEncode({'id': 'device-001'}), 201);
+      }
+
+      incidentAttempts++;
 
       final payload = jsonDecode(request.body) as Map<String, dynamic>;
 
       submittedEventIds.add(payload['client_event_id'] as String);
 
-      if (attempt == 1) {
+      if (incidentAttempts == 1) {
         return http.Response(
           jsonEncode({'detail': 'Temporarily unavailable'}),
           503,
@@ -199,7 +257,10 @@ void main() {
 
     expect(incidents.single['sync_status'], 'failed');
     expect(incidents.single['retry_count'], 1);
-    expect(incidents.single['last_sync_error'], 'HTTP 503');
+    expect(
+      incidents.single['last_sync_error'],
+      'HTTP 503: detail: Temporarily unavailable',
+    );
 
     // Attempt 2: the server accepts the same event.
     final secondResult = await service.synchronizePendingIncidents(
@@ -207,7 +268,7 @@ void main() {
     );
 
     expect(secondResult, isTrue);
-    expect(attempt, 2);
+    expect(incidentAttempts, 2);
 
     // The stable identifier must not change between attempts.
     expect(submittedEventIds, [eventId, eventId]);
@@ -231,6 +292,10 @@ void main() {
     );
 
     final client = MockClient((request) async {
+      if (request.url.path == '/api/devices/register/') {
+        return http.Response(jsonEncode({'id': 'device-audio-001'}), 201);
+      }
+
       if (request.url.path.endsWith('/incidents/')) {
         return http.Response(
           jsonEncode({
@@ -306,6 +371,10 @@ void main() {
     final mockClient = MockClient((request) async {
       httpCalls++;
 
+      if (request.url.path == '/api/devices/register/') {
+        return http.Response(jsonEncode({'id': 'device-004'}), 201);
+      }
+
       return http.Response(
         jsonEncode({'id': 'server-004'}),
         201,
@@ -324,7 +393,7 @@ void main() {
     );
 
     expect(firstResult, isTrue);
-    expect(httpCalls, 1);
+    expect(httpCalls, 2);
 
     final secondResult = await service.synchronizePendingIncidents(
       token: 'test-token',
@@ -333,7 +402,7 @@ void main() {
     expect(secondResult, isTrue);
 
     // The second call should find no pending incidents.
-    expect(httpCalls, 1);
+    expect(httpCalls, 2);
 
     final incidents = await database.getAllIncidents();
 
@@ -350,6 +419,10 @@ void main() {
       await saveIncident();
 
       final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/devices/register/') {
+          return http.Response(jsonEncode({'id': 'device-005'}), 201);
+        }
+
         return http.Response(
           jsonEncode({'detail': 'Accepted without an ID'}),
           201,

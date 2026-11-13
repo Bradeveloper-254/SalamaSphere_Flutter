@@ -5,6 +5,8 @@ class ApiConfig {
   static const String loginEndpoint = '/api/accounts/login/';
   static const String currentUserEndpoint = '/api/accounts/me/';
   static const String registerEndpoint = '/api/accounts/register/';
+  static const String wearableDeviceRegistrationEndpoint =
+      '/api/devices/register/';
   static const String incidentsEndpoint = '/api/incidents/';
   static String incidentEvidenceEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/evidence/';

@@ -115,11 +115,46 @@ class IncidentSyncService {
         await database.markIncidentUploading(clientEventId: eventId);
         final latitude = incident['latitude'] as num?;
         final longitude = incident['longitude'] as num?;
+        final deviceIdentifier =
+            incident['device_identifier']?.toString().trim() ?? '';
+        if (deviceIdentifier.isEmpty ||
+            deviceIdentifier == 'SalamaSphere wearable') {
+          throw StateError('The wearable device identifier is missing.');
+        }
+
+        final registrationResponse = await client
+            .post(
+              Uri.parse(
+                '${ApiConfig.baseUrl}'
+                '${ApiConfig.wearableDeviceRegistrationEndpoint}',
+              ),
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': 'Token $token',
+              },
+              body: jsonEncode({
+                'device_name': 'SalamaSphere wearable',
+                'device_identifier': deviceIdentifier,
+                'firmware_version': 'unknown',
+              }),
+            )
+            .timeout(const Duration(seconds: 20));
+
+        if (registrationResponse.statusCode < 200 ||
+            registrationResponse.statusCode >= 300) {
+          final detail = _responseErrorMessage(registrationResponse.body);
+          throw StateError(
+            'Wearable registration failed '
+            '(HTTP ${registrationResponse.statusCode})'
+            '${detail.isEmpty ? '.' : ': $detail'}',
+          );
+        }
 
         final payload = <String, dynamic>{
           'client_event_id': eventId,
           'wearable_event_id': eventId,
-          'device_identifier': incident['device_identifier'],
+          'device_identifier': deviceIdentifier,
           'event_type': incident['event_type'],
           'source': 'wearable',
           'is_sos': true,
@@ -194,10 +229,13 @@ class IncidentSyncService {
           await database.markIncidentSynchronized(clientEventId: eventId);
         } else {
           allSucceeded = false;
+          final detail = _responseErrorMessage(response.body);
 
           await database.markIncidentFailed(
             clientEventId: eventId,
-            error: 'HTTP ${response.statusCode}',
+            error:
+                'HTTP ${response.statusCode}'
+                '${detail.isEmpty ? '' : ': $detail'}',
           );
         }
       } catch (error) {
@@ -205,7 +243,9 @@ class IncidentSyncService {
 
         await database.markIncidentFailed(
           clientEventId: eventId,
-          error: error.toString(),
+          error: error is StateError
+              ? error.message.toString()
+              : error.toString(),
         );
       }
     }
@@ -219,6 +259,22 @@ class IncidentSyncService {
       return {...decoded, ...nested};
     }
     return decoded;
+  }
+
+  String _responseErrorMessage(String body) {
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return body.trim();
+    }
+
+    if (decoded is Map<String, dynamic>) {
+      return decoded.entries
+          .map((entry) => '${entry.key}: ${entry.value}')
+          .join('; ');
+    }
+    return decoded?.toString() ?? body.trim();
   }
 
   bool _ackBool(
