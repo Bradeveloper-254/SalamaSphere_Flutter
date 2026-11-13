@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
                 val files = call.argument<List<Map<String, Any>>>("files") ?: emptyList()
                 try {
                     val uris = ArrayList<android.net.Uri>()
+                    val mimeTypes = ArrayList<String>()
                     for (attachment in files) {
                         val fileName = attachment["fileName"] as? String
                             ?: throw IllegalArgumentException("A shared file has no file name.")
@@ -31,6 +32,7 @@ class MainActivity : FlutterActivity() {
                         if (bytes.isEmpty()) {
                             throw IllegalArgumentException("A shared file is empty.")
                         }
+                        mimeTypes.add(mimeType)
                         val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
                         val file = File(cacheDir, "incident-${UUID.randomUUID()}-$safeName")
                         file.writeBytes(bytes)
@@ -43,14 +45,30 @@ class MainActivity : FlutterActivity() {
                         )
                     }
 
-                    val intent = if (uris.isEmpty()) {
-                        Intent(Intent.ACTION_SEND).apply {
+                    val sharedMimeType = when {
+                        mimeTypes.isEmpty() -> "text/plain"
+                        mimeTypes.distinct().size == 1 -> mimeTypes.first()
+                        mimeTypes.all { it.startsWith("video/") } -> "video/*"
+                        mimeTypes.all { it.startsWith("audio/") } -> "audio/*"
+                        else -> "*/*"
+                    }
+                    val intent = when {
+                        uris.isEmpty() -> Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, text)
                         }
-                    } else {
-                        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                            type = "*/*"
+                        uris.size == 1 -> Intent(Intent.ACTION_SEND).apply {
+                            type = sharedMimeType
+                            putExtra(Intent.EXTRA_STREAM, uris.first())
+                            putExtra(Intent.EXTRA_TEXT, text)
+                            clipData = ClipData.newUri(
+                                contentResolver,
+                                title,
+                                uris.first()
+                            )
+                        }
+                        else -> Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                            type = sharedMimeType
                             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                             putExtra(Intent.EXTRA_TEXT, text)
                             clipData = ClipData.newUri(

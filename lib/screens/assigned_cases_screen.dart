@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import '../widgets/incident_media.dart';
 
 class AssignedCasesScreen extends StatefulWidget {
   final ApiService apiService;
@@ -174,6 +175,11 @@ class _AssignedCasesScreenState extends State<AssignedCasesScreen> {
               _detail('Occurred at', _formatDate(incident['occurred_at'])),
               _detail('Received at', _formatDate(incident['received_at'])),
               _detail('Description', incident['description']),
+              if (incidentId.isNotEmpty)
+                IncidentEvidenceList(
+                  apiService: widget.apiService,
+                  incidentId: incidentId,
+                ),
               if (latitude != null && longitude != null) ...[
                 _detail('Latitude', latitude),
                 _detail('Longitude', longitude),

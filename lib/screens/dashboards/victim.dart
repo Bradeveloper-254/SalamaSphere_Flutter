@@ -15,6 +15,7 @@ import '../../services/local_database_service.dart';
 import '../../services/location_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/trusted_contact.dart';
+import '../../widgets/incident_media.dart';
 import '../login_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -1453,6 +1454,33 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     );
   }
 
+  Future<void> _showIncidentMedia(Map<String, dynamic> incident) async {
+    final incidentId = _field(incident, [
+      'id',
+      'incident_id',
+      'uuid',
+    ], fallback: '');
+    if (incidentId.isEmpty || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Incident media'),
+        content: SingleChildScrollView(
+          child: IncidentEvidenceList(
+            apiService: widget.apiService,
+            incidentId: incidentId,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openEvidenceFile(Map<String, dynamic> evidence) async {
     final evidenceId = evidence['id']?.toString();
     if (evidenceId == null || evidenceId.isEmpty) return;
@@ -1469,28 +1497,21 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     }
 
     final bytes = List<int>.from(response['bytes'] as List);
-    final mimeType =
-        response['mime_type']?.toString() ??
-        evidence['mime_type']?.toString() ??
-        'application/octet-stream';
     final fileName = evidence['original_filename']?.toString() ?? 'evidence';
+    final mimeType = resolveEvidenceMimeType(
+      mimeType:
+          response['mime_type']?.toString() ??
+          evidence['mime_type']?.toString(),
+      fileName: fileName,
+    );
 
     if (mimeType.startsWith('video/')) {
-      try {
-        await const MethodChannel('com.salamasphere/share')
-            .invokeMethod<void>('viewMedia', {
-              'title': fileName,
-              'fileName': fileName,
-              'mimeType': mimeType,
-              'bytes': Uint8List.fromList(bytes),
-            });
-      } on PlatformException catch (error) {
-        if (mounted) _showMessage('Could not open video: ${error.message}');
-      } on MissingPluginException {
-        if (mounted) {
-          _showMessage('Video preview is unavailable on this device.');
-        }
-      }
+      await showEvidenceMediaDialog(
+        context,
+        fileName: fileName,
+        mimeType: mimeType,
+        bytes: bytes,
+      );
       return;
     }
 
@@ -1608,9 +1629,14 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       }
       return;
     }
+    final fileName =
+        evidence['original_filename']?.toString() ?? 'evidence';
     await _shareEvidenceBytes(
-      fileName: evidence['original_filename']?.toString() ?? 'evidence',
-      mimeType: evidence['mime_type']?.toString() ?? 'application/octet-stream',
+      fileName: fileName,
+      mimeType: resolveEvidenceMimeType(
+        mimeType: evidence['mime_type']?.toString(),
+        fileName: fileName,
+      ),
       bytes: List<int>.from(result['bytes'] as List),
       contacts: recipients,
     );
@@ -1696,7 +1722,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     }
 
     dynamic evidenceItems = incident['evidence'];
-    if (evidenceItems is! List && id != 'unknown' && id != clientEventId) {
+    if (id != 'unknown' && id != clientEventId) {
       final response = await widget.apiService.fetchIncidentEvidence(id);
       if (response['success'] != true) {
         if (mounted) {
@@ -1707,7 +1733,24 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         }
         return;
       }
-      evidenceItems = response['data'];
+      final data = response['data'];
+      evidenceItems = data is Map && data['results'] is List
+          ? data['results']
+          : data is Map && data['evidence'] is List
+          ? data['evidence']
+          : data;
+    }
+    while (evidenceItems is Map) {
+      if (evidenceItems['results'] is List) {
+        evidenceItems = evidenceItems['results'];
+      } else if (evidenceItems['evidence'] is List) {
+        evidenceItems = evidenceItems['evidence'];
+      } else if (evidenceItems['data'] is List ||
+          evidenceItems['data'] is Map) {
+        evidenceItems = evidenceItems['data'];
+      } else {
+        break;
+      }
     }
 
     final mediaFiles = <Map<String, Object>>[];
@@ -1727,8 +1770,10 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         final evidence = Map<String, dynamic>.from(item);
         final evidenceId = evidence['id'].toString();
         final filename = evidence['original_filename'].toString();
-        final mimeType =
-            evidence['mime_type']?.toString() ?? 'application/octet-stream';
+        final mimeType = resolveEvidenceMimeType(
+          mimeType: evidence['mime_type']?.toString(),
+          fileName: filename,
+        );
         final downloaded = await widget.apiService.fetchEvidenceFile(
           evidenceId,
         );
@@ -1741,10 +1786,16 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           }
           return;
         }
-        if (evidence['evidence_type'] == 'audio') hasAudioEvidence = true;
+        if (mimeType.startsWith('audio/') ||
+            evidence['evidence_type'] == 'audio') {
+          hasAudioEvidence = true;
+        }
         mediaFiles.add({
           'fileName': filename,
-          'mimeType': downloaded['mime_type']?.toString() ?? mimeType,
+          'mimeType': resolveEvidenceMimeType(
+            mimeType: downloaded['mime_type']?.toString() ?? mimeType,
+            fileName: filename,
+          ),
           'bytes': Uint8List.fromList(
             List<int>.from(downloaded['bytes'] as List),
           ),
@@ -1768,6 +1819,45 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           'mimeType': localAudio?['mime_type']?.toString() ?? 'audio/wav',
           'bytes': Uint8List.fromList(bytes),
         });
+      }
+    }
+
+    final hasSharedAudio = mediaFiles.any(
+      (file) => file['mimeType'].toString().startsWith('audio/'),
+    );
+    if (!hasAudioEvidence &&
+        !hasSharedAudio &&
+        id != 'unknown' &&
+        id != clientEventId &&
+        (incident['audio_available'] == true ||
+            incident['audio_url'] != null)) {
+      final audio = await widget.apiService.fetchIncidentAudio(id);
+      final audioBytes = audio['bytes'];
+      if (audio['success'] == true &&
+          audioBytes is List<int> &&
+          audioBytes.isNotEmpty) {
+        final mimeType =
+            audio['mime_type']?.toString() ?? 'audio/wav';
+        final extension = mimeType == 'audio/mpeg'
+            ? 'mp3'
+            : mimeType == 'audio/mp4'
+            ? 'm4a'
+            : mimeType == 'audio/aac'
+            ? 'aac'
+            : 'wav';
+        mediaFiles.add({
+          'fileName': 'salamasphere-$id.$extension',
+          'mimeType': mimeType,
+          'bytes': Uint8List.fromList(audioBytes),
+        });
+      } else {
+        if (mounted) {
+          _showMessage(
+            audio['message']?.toString() ??
+                'Could not retrieve the incident recording to share.',
+          );
+        }
+        return;
       }
     }
 
@@ -2324,6 +2414,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                             icon: const Icon(Icons.lock_open_outlined),
                             label: const Text('Recording'),
                           ),
+                        TextButton.icon(
+                          onPressed: () => _showIncidentMedia(incident),
+                          icon: const Icon(Icons.video_library_outlined),
+                          label: const Text('Media'),
+                        ),
                         TextButton.icon(
                           onPressed: () => _shareIncident(incident),
                           icon: const Icon(Icons.share_outlined),

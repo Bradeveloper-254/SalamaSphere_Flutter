@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import '../widgets/incident_media.dart';
 
 class IncidentDashboardScreen extends StatefulWidget {
   final ApiService apiService;
@@ -507,6 +508,9 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
     );
     final canAccessAudio =
         !widget.isTrustedContact || widget.incident['can_view_audio'] == true;
+    final canAccessEvidence =
+        !widget.isTrustedContact ||
+        widget.incident['can_view_evidence'] == true;
 
     return SafeArea(
       child: Padding(
@@ -549,6 +553,11 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
                 'Audio acknowledgement',
                 _value(['audio_ack_status'], fallback: 'Unknown'),
               ),
+              if (canAccessEvidence)
+                IncidentEvidenceList(
+                  apiService: widget.apiService,
+                  incidentId: _value(['id', 'incident_id', 'uuid']),
+                ),
               _detail(
                 'Notification acknowledgement',
                 _value(['notification_ack_status'], fallback: 'Unknown'),
@@ -567,12 +576,22 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
                   ),
                 ),
               if (!canAccessAudio)
-                const Card(
+                Card(
                   child: ListTile(
-                    leading: Icon(Icons.lock),
-                    title: Text('Audio restricted'),
+                    leading: const Icon(Icons.lock),
+                    title: const Text('Audio restricted'),
                     subtitle: Text(
                       'This trusted contact has no recording permission for this incident.',
+                    ),
+                  ),
+                ),
+              if (!canAccessEvidence)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.lock),
+                    title: const Text('Incident media restricted'),
+                    subtitle: Text(
+                      'This trusted contact has no media permission for this incident.',
                     ),
                   ),
                 ),
