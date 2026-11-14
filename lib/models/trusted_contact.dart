@@ -19,6 +19,9 @@ class TrustedContact {
   final bool emailEnabled;
   final bool active;
   final bool consentConfirmed;
+  final bool receiveVoiceCalls;
+  final bool confirmVoiceConsent;
+  final DateTime? voiceConsentConfirmedAt;
 
   const TrustedContact({
     this.id,
@@ -30,6 +33,9 @@ class TrustedContact {
     this.emailEnabled = false,
     this.active = true,
     this.consentConfirmed = false,
+    this.receiveVoiceCalls = false,
+    this.confirmVoiceConsent = false,
+    this.voiceConsentConfirmedAt,
   });
 
   factory TrustedContact.fromJson(Map<String, dynamic> json) {
@@ -44,17 +50,21 @@ class TrustedContact {
       emailEnabled: json['email_enabled'] == true,
       active: (json['active'] ?? json['is_active'] ?? true) == true,
       consentConfirmed: json['consent_confirmed'] == true,
+      receiveVoiceCalls: json['receive_voice_calls'] == true,
+      confirmVoiceConsent: json['confirm_voice_consent'] == true,
+      voiceConsentConfirmedAt: json['voice_consent_confirmed_at'] == null
+          ? null
+          : DateTime.tryParse(json['voice_consent_confirmed_at'].toString()),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'name': name.trim(),
     'phone_number': phoneNumber.trim(),
-    // These names match the Django trusted_contacts serializer. The
-    // backend currently delivers SOS alerts by SMS; unsupported channel
-    // fields must not be sent as unknown serializer fields.
     'receive_sos_alerts': smsEnabled,
     'is_active': active,
     'confirm_sos_consent': consentConfirmed,
+    'receive_voice_calls': receiveVoiceCalls,
+    'confirm_voice_consent': confirmVoiceConsent,
   };
 }

@@ -747,7 +747,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                             title: Text(contact.name),
                             subtitle: Text(
                               '${contact.phoneNumber}\n'
-                              '${contact.smsEnabled ? 'SMS alerts enabled' : 'SMS alerts disabled'}',
+                              '${contact.smsEnabled ? 'SMS alerts enabled' : 'SMS alerts disabled'}; '
+                              '${contact.receiveVoiceCalls ? 'voice calls enabled' : 'voice calls disabled'}',
                             ),
                             trailing: IconButton(
                               tooltip: 'Delete ${contact.name}',
@@ -1127,6 +1128,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     final phoneController = TextEditingController();
     var smsEnabled = true;
     var consentConfirmed = false;
+    var voiceCallsEnabled = false;
+    var voiceConsentConfirmed = false;
     var saving = false;
     String? saveError;
     final formKey = GlobalKey<FormState>();
@@ -1144,58 +1147,79 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
               Text('Add trusted contact'),
             ],
           ),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Name',
-                    prefixIcon: Icon(Icons.person_outline),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Name',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Enter a name'
+                        : null,
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Enter a name'
-                      : null,
-                ),
-                TextFormField(
-                  controller: phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Kenyan phone number',
-                    hintText: '0712 345 678 or +254 712 345 678',
-                    prefixIcon: Icon(Icons.phone_outlined),
+                  TextFormField(
+                    controller: phoneController,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Kenyan phone number',
+                      hintText: '0712 345 678 or +254 712 345 678',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Enter a phone number'
+                        : null,
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Enter a phone number'
-                      : null,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Receive SMS alerts'),
-                  value: smsEnabled,
-                  onChanged: (value) =>
-                      setDialogState(() => smsEnabled = value),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: const Text(
-                    "I have this contact's permission to receive SOS alerts.",
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Receive SMS alerts'),
+                    value: smsEnabled,
+                    onChanged: (value) =>
+                        setDialogState(() => smsEnabled = value),
                   ),
-                  value: consentConfirmed,
-                  onChanged: (value) =>
-                      setDialogState(() => consentConfirmed = value ?? false),
-                ),
-                if (saveError != null)
-                  Text(
-                    saveError!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      "I have this contact's permission to receive SOS alerts.",
+                    ),
+                    value: consentConfirmed,
+                    onChanged: (value) =>
+                        setDialogState(() => consentConfirmed = value ?? false),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Receive automated voice calls'),
+                    value: voiceCallsEnabled,
+                    onChanged: (value) =>
+                        setDialogState(() => voiceCallsEnabled = value),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      "I have this contact's permission to receive "
+                      'automated emergency voice calls.',
+                    ),
+                    value: voiceConsentConfirmed,
+                    onChanged: (value) => setDialogState(
+                      () => voiceConsentConfirmed = value ?? false,
                     ),
                   ),
-              ],
+                  if (saveError != null)
+                    Text(
+                      saveError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -1215,6 +1239,12 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                         );
                         return;
                       }
+                      if (voiceCallsEnabled && !voiceConsentConfirmed) {
+                        setDialogState(
+                          () => saveError = 'Confirm contact permission before enabling emergency voice calls.',
+                        );
+                        return;
+                      }
                       setDialogState(() {
                         saving = true;
                         saveError = null;
@@ -1227,6 +1257,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                           ),
                           smsEnabled: smsEnabled,
                           consentConfirmed: consentConfirmed,
+                          receiveVoiceCalls: voiceCallsEnabled,
+                          confirmVoiceConsent: voiceConsentConfirmed,
                         ),
                       );
                       if (!dialogContext.mounted) return;
@@ -1639,8 +1671,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       }
       return;
     }
-    final fileName =
-        evidence['original_filename']?.toString() ?? 'evidence';
+    final fileName = evidence['original_filename']?.toString() ?? 'evidence';
     await _shareEvidenceBytes(
       fileName: fileName,
       mimeType: resolveEvidenceMimeType(
@@ -1846,8 +1877,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       if (audio['success'] == true &&
           audioBytes is List<int> &&
           audioBytes.isNotEmpty) {
-        final mimeType =
-            audio['mime_type']?.toString() ?? 'audio/wav';
+        final mimeType = audio['mime_type']?.toString() ?? 'audio/wav';
         final extension = mimeType == 'audio/mpeg'
             ? 'mp3'
             : mimeType == 'audio/mp4'

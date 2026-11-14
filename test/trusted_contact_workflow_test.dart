@@ -15,6 +15,33 @@ void main() {
     expect(normalizeKenyanPhoneNumber('+254 712 345 678'), '+254712345678');
   });
 
+  test('voice-call consent is independent of SMS consent in JSON', () {
+    const contact = TrustedContact(
+      name: 'Voice contact',
+      phoneNumber: '+254712345678',
+      smsEnabled: false,
+      consentConfirmed: false,
+      receiveVoiceCalls: true,
+      confirmVoiceConsent: true,
+    );
+
+    expect(contact.toJson()['receive_sos_alerts'], isFalse);
+    expect(contact.toJson()['confirm_sos_consent'], isFalse);
+    expect(contact.toJson()['receive_voice_calls'], isTrue);
+    expect(contact.toJson()['confirm_voice_consent'], isTrue);
+
+    final restored = TrustedContact.fromJson({
+      ...contact.toJson(),
+      'voice_consent_confirmed_at': '2026-11-14T07:00:00Z',
+    });
+    expect(restored.receiveVoiceCalls, isTrue);
+    expect(restored.smsEnabled, isFalse);
+    expect(
+      restored.voiceConsentConfirmedAt,
+      DateTime.parse('2026-11-14T07:00:00Z'),
+    );
+  });
+
   test(
     'saved trusted contact appears in the refreshed app contact list',
     () async {
@@ -41,6 +68,8 @@ void main() {
           expect(payload['phone_number'], '+254712345678');
           expect(payload['receive_sos_alerts'], isTrue);
           expect(payload['confirm_sos_consent'], isTrue);
+          expect(payload['receive_voice_calls'], isFalse);
+          expect(payload['confirm_voice_consent'], isFalse);
           return http.Response(
             jsonEncode({
               'id': contactId,
@@ -49,6 +78,8 @@ void main() {
               'receive_sos_alerts': true,
               'is_active': true,
               'consent_confirmed': true,
+              'receive_voice_calls': false,
+              'voice_consent_confirmed_at': null,
             }),
             201,
           );
@@ -65,6 +96,8 @@ void main() {
                 'receive_sos_alerts': true,
                 'is_active': true,
                 'consent_confirmed': true,
+                'receive_voice_calls': false,
+                'voice_consent_confirmed_at': null,
               },
             ]),
             200,
