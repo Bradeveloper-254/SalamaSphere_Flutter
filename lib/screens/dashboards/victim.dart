@@ -101,6 +101,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
       _retryPendingUploads,
     );
+    unawaited(Connectivity().checkConnectivity().then(_retryPendingUploads));
     _loadIncidents();
   }
 
@@ -118,13 +119,21 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       return;
     }
 
-    final token = widget.apiService.authToken!;
-    await _incidentSync.synchronizePendingIncidents(token: token);
-    await _incidentSync.synchronizePendingAudio(
-      upload: widget.apiService.uploadIncidentAudio,
-    );
-    await _deleteUploadedWearableRecordings();
-    if (mounted) await _loadIncidents();
+    try {
+      final token = widget.apiService.authToken!;
+      await _incidentSync.synchronizePendingIncidents(token: token);
+      await _incidentSync.synchronizePendingAudio(
+        upload: widget.apiService.uploadIncidentAudio,
+      );
+      await _deleteUploadedWearableRecordings();
+      if (mounted) await _loadIncidents();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _wearableMessage = 'Pending incident sync will retry when online.';
+        });
+      }
+    }
   }
 
   Future<void> _deleteUploadedWearableRecordings() async {

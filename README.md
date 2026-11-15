@@ -2,6 +2,8 @@
 
 Flutter Android client for SalamaSphere.
 
+The sketch in `wearable_firmware/salamasphere_wearable.ino` mirrors the canonical firmware in the SalamaSphere backend repository at `SalamaSphere_device/firmware/production/salamasphere_wearable.ino`. Keep both copies synchronized.
+
 ## Incident flow
 
 - Connect to the wearable over BLE and subscribe to SOS, recording status,

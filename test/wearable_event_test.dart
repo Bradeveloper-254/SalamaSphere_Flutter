@@ -33,18 +33,27 @@ void main() {
     expect(event.timestamp.isUtc, isTrue);
   });
 
-  test('Rejects invalid JSON', () {
+  test('Reports invalid JSON on the BLE error stream', () async {
     final bytes = utf8.encode('{invalid-json');
+    final errorFuture = expectLater(
+      bleService.errors,
+      emits(isA<FormatException>()),
+    );
 
-    expect(() => bleService.parseEvent(bytes), throwsFormatException);
+    bleService.parseEvent(bytes);
+    await errorFuture;
   });
 
-  test('Rejects an event with missing required fields', () {
+  test('Reports events with missing required fields on the BLE error stream', () async {
     final payload = {'event_id': 'event-example-002', 'event_type': 'SOS'};
-
     final bytes = utf8.encode(jsonEncode(payload));
+    final errorFuture = expectLater(
+      bleService.errors,
+      emits(isA<FormatException>()),
+    );
 
-    expect(() => bleService.parseEvent(bytes), throwsFormatException);
+    bleService.parseEvent(bytes);
+    await errorFuture;
   });
 
   test('Converts an event to JSON', () {
