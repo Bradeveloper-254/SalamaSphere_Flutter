@@ -729,7 +729,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.people_alt_rounded, color: _brand),
               SizedBox(width: 10),
@@ -1168,7 +1168,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.person_add_alt_1, color: _brand),
               SizedBox(width: 10),
