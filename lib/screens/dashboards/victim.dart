@@ -759,7 +759,20 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                               '${contact.smsEnabled ? 'SMS alerts enabled' : 'SMS alerts disabled'}; '
                               '${contact.receiveVoiceCalls ? 'voice calls enabled' : 'voice calls disabled'}',
                             ),
-                            trailing: IconButton(
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Edit ${contact.name}',
+                                  onPressed: contact.id == null
+                                      ? null
+                                      : () async {
+                                          Navigator.pop(dialogContext);
+                                          await _addTrustedContact(contact);
+                                        },
+                                  icon: const Icon(Icons.edit_outlined),
+                                ),
+                                IconButton(
                               tooltip: 'Delete ${contact.name}',
                               onPressed: contact.id == null
                                   ? null
@@ -815,6 +828,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                                 Icons.delete_outline,
                                 color: Colors.red,
                               ),
+                                ),
+                              ],
                             ),
                           ),
                         )
@@ -1132,13 +1147,17 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     messageController.dispose();
   }
 
-  Future<void> _addTrustedContact() async {
+  Future<void> _addTrustedContact([TrustedContact? existing]) async {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
-    var smsEnabled = true;
-    var consentConfirmed = false;
-    var voiceCallsEnabled = false;
-    var voiceConsentConfirmed = false;
+    nameController.text = existing?.name ?? '';
+    phoneController.text = existing?.phoneNumber ?? '';
+    var smsEnabled = existing?.smsEnabled ?? true;
+    var consentConfirmed = existing?.consentConfirmed ?? false;
+    var voiceCallsEnabled = existing?.receiveVoiceCalls ?? false;
+    var voiceConsentConfirmed = voiceCallsEnabled &&
+        existing?.voiceConsentConfirmedAt != null &&
+        existing?.voiceConsentWithdrawnAt == null;
     var saving = false;
     String? saveError;
     final formKey = GlobalKey<FormState>();
@@ -1153,7 +1172,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
             children: [
               Icon(Icons.person_add_alt_1, color: _brand),
               SizedBox(width: 10),
-              Text('Add trusted contact'),
+              Text(existing == null ? 'Add trusted contact' : 'Edit trusted contact'),
             ],
           ),
           content: SingleChildScrollView(
@@ -1260,10 +1279,12 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                       });
                       final result = await _notifications.saveTrustedContact(
                         TrustedContact(
+                          id: existing?.id,
                           name: nameController.text,
                           phoneNumber: normalizeKenyanPhoneNumber(
                             phoneController.text,
                           ),
+                          relationship: existing?.relationship ?? '',
                           smsEnabled: smsEnabled,
                           consentConfirmed: consentConfirmed,
                           receiveVoiceCalls: voiceCallsEnabled,
@@ -1288,7 +1309,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Save'),
+                  : Text(existing == null ? 'Save' : 'Update'),
             ),
           ],
         ),

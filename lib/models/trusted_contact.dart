@@ -14,6 +14,7 @@ class TrustedContact {
   final String name;
   final String phoneNumber;
   final String? email;
+  final String relationship;
   final bool smsEnabled;
   final bool pushEnabled;
   final bool emailEnabled;
@@ -22,12 +23,14 @@ class TrustedContact {
   final bool receiveVoiceCalls;
   final bool confirmVoiceConsent;
   final DateTime? voiceConsentConfirmedAt;
+  final DateTime? voiceConsentWithdrawnAt;
 
   const TrustedContact({
     this.id,
     required this.name,
     required this.phoneNumber,
     this.email,
+    this.relationship = '',
     this.smsEnabled = true,
     this.pushEnabled = false,
     this.emailEnabled = false,
@@ -36,6 +39,7 @@ class TrustedContact {
     this.receiveVoiceCalls = false,
     this.confirmVoiceConsent = false,
     this.voiceConsentConfirmedAt,
+    this.voiceConsentWithdrawnAt,
   });
 
   factory TrustedContact.fromJson(Map<String, dynamic> json) {
@@ -44,6 +48,7 @@ class TrustedContact {
       name: (json['name'] ?? '').toString(),
       phoneNumber: (json['phone_number'] ?? json['phone'] ?? '').toString(),
       email: json['email']?.toString(),
+      relationship: (json['relationship'] ?? '').toString(),
       smsEnabled:
           (json['sms_enabled'] ?? json['receive_sos_alerts'] ?? true) == true,
       pushEnabled: json['push_enabled'] == true,
@@ -55,12 +60,16 @@ class TrustedContact {
       voiceConsentConfirmedAt: json['voice_consent_confirmed_at'] == null
           ? null
           : DateTime.tryParse(json['voice_consent_confirmed_at'].toString()),
+      voiceConsentWithdrawnAt: json['voice_consent_withdrawn_at'] == null
+          ? null
+          : DateTime.tryParse(json['voice_consent_withdrawn_at'].toString()),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'name': name.trim(),
     'phone_number': phoneNumber.trim(),
+    'relationship': relationship.trim(),
     'receive_sos_alerts': smsEnabled,
     'is_active': active,
     'confirm_sos_consent': consentConfirmed,
