@@ -12,6 +12,12 @@ class ApiConfig {
       '/api/incidents/$incidentId/evidence/';
   static String evidenceFileEndpoint(String evidenceId) =>
       '/api/evidence/$evidenceId/file/';
+  static String evidenceTranscribeEndpoint(String evidenceId) =>
+      '/api/evidence/$evidenceId/transcribe/';
+  static String evidenceTranscriptsEndpoint(String evidenceId) =>
+      '/api/evidence/$evidenceId/transcripts/';
+  static String evidenceTranscriptReviewEndpoint(String transcriptId) =>
+      '/api/transcripts/$transcriptId/review/';
   static const String dashboardOverviewEndpoint = '/api/dashboard/overview/';
   static const String trustedContactsEndpoint = '/api/trusted-contacts/';
   static const String notificationDeliveriesEndpoint = '/api/notifications/';

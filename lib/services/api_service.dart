@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import 'dart:async';
 import 'dart:math';
 
@@ -659,6 +662,7 @@ class ApiService {
     required String shareWith,
     List<int> trustedContactIds = const [],
     String message = '',
+    String? sha256Hash,
   }) async {
     if (_token == null) {
       return {
@@ -672,6 +676,15 @@ class ApiService {
       return {
         'success': false,
         'message': 'Provide exactly one evidence file source.',
+      };
+    }
+    final expectedHash =
+        sha256Hash ?? (bytes == null ? null : sha256.convert(bytes).toString());
+    if (expectedHash == null ||
+        !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(expectedHash)) {
+      return {
+        'success': false,
+        'message': 'A valid plaintext SHA-256 hash is required.',
       };
     }
     final request =
@@ -694,6 +707,8 @@ class ApiService {
           ..fields['visibility'] = 'protected'
           ..fields['share_with'] = shareWith
           ..fields['message'] = message
+          ..fields['sha256_hash'] = expectedHash
+          ..fields['sha256_hash_type'] = 'plaintext'
           ..fields.addAll({
             for (var index = 0; index < trustedContactIds.length; index++)
               'trusted_contact_ids[$index]': trustedContactIds[index]
@@ -786,6 +801,27 @@ class ApiService {
       };
     }
   }
+
+  Future<Map<String, dynamic>> transcribeEvidence(
+    String evidenceId, {
+    String language = 'auto',
+  }) => _requestJson(
+    'POST',
+    ApiConfig.evidenceTranscribeEndpoint(evidenceId),
+    body: {'language': language},
+  );
+
+  Future<Map<String, dynamic>> fetchEvidenceTranscripts(String evidenceId) =>
+      _requestJson('GET', ApiConfig.evidenceTranscriptsEndpoint(evidenceId));
+
+  Future<Map<String, dynamic>> reviewEvidenceTranscript({
+    required String transcriptId,
+    required String correctedText,
+  }) => _requestJson(
+    'PUT',
+    ApiConfig.evidenceTranscriptReviewEndpoint(transcriptId),
+    body: {'transcript': correctedText},
+  );
 
   Future<Map<String, dynamic>> fetchIncidentEvidence(String incidentId) {
     return _requestJson('GET', ApiConfig.incidentEvidenceEndpoint(incidentId));
@@ -895,6 +931,8 @@ class ApiService {
     );
     request.headers['Accept'] = 'application/json';
     request.headers['Authorization'] = 'Token $_token';
+    request.fields['sha256_hash'] = sha256.convert(bytes).toString();
+    request.fields['sha256_hash_type'] = 'plaintext';
     request.files.add(
       http.MultipartFile.fromBytes(
         'file',

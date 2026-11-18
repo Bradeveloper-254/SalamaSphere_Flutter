@@ -749,6 +749,7 @@ class LocalDatabaseService {
       {'evidence_hash': hash, 'evidence_hash_status': 'calculated'},
       where: 'client_event_id = ?',
       whereArgs: [clientEventId],
+      conflictAlgorithm: ConflictAlgorithm.ignore,
     );
     await updateIncidentAcknowledgements(
       clientEventId: clientEventId,

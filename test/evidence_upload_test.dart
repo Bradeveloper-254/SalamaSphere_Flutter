@@ -26,6 +26,15 @@ void main() {
         final body = utf8.decode(multipart.bodyBytes);
         expect(body, contains('name="media_type"'));
         expect(body, contains('video'));
+        expect(body, contains('name="sha256_hash"'));
+        expect(
+          body,
+          contains(
+            '3e66ede228ae2f3f6cf3c95cb1fba47226b630fa25b4da48f3438fcb7c9d6376',
+          ),
+        );
+        expect(body, contains('name="sha256_hash_type"'));
+        expect(body, contains('plaintext'));
         expect(body, contains('filename="test-video.mp4"'));
         expect(body, contains('video-data'));
         return http.Response(jsonEncode({'id': 'evidence-123'}), 201);
@@ -47,6 +56,8 @@ void main() {
       fileName: 'test-video.mp4',
       mimeType: 'video/mp4',
       shareWith: 'authorities',
+      sha256Hash:
+          '3e66ede228ae2f3f6cf3c95cb1fba47226b630fa25b4da48f3438fcb7c9d6376',
     );
 
     expect(response['success'], isTrue, reason: response.toString());

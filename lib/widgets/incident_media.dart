@@ -176,41 +176,326 @@ class _IncidentEvidenceListState extends State<IncidentEvidenceList> {
               final isAudio =
                   mimeType.startsWith('audio/') ||
                   item['evidence_type'] == 'audio';
-              return ListTile(
-                leading: Icon(
-                  isVideo
-                      ? Icons.video_file_outlined
-                      : isAudio
-                      ? Icons.audio_file_outlined
-                      : Icons.attach_file,
-                ),
-                title: Text(
-                  item['original_filename']?.toString() ?? 'Incident media',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  isVideo
-                      ? 'Video'
-                      : isAudio
-                      ? 'Audio'
-                      : 'File',
-                ),
-                trailing: _openingEvidenceIds.contains(id)
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_circle_outline),
-                onTap: id.isEmpty || _openingEvidenceIds.contains(id)
-                    ? null
-                    : () => _openEvidence(item),
+              return Column(
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      isVideo
+                          ? Icons.video_file_outlined
+                          : isAudio
+                          ? Icons.audio_file_outlined
+                          : Icons.attach_file,
+                    ),
+                    title: Text(
+                      item['original_filename']?.toString() ?? 'Incident media',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      isVideo
+                          ? 'Video'
+                          : isAudio
+                          ? 'Audio'
+                          : 'File',
+                    ),
+                    trailing: _openingEvidenceIds.contains(id)
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.play_circle_outline),
+                    onTap: id.isEmpty || _openingEvidenceIds.contains(id)
+                        ? null
+                        : () => _openEvidence(item),
+                  ),
+                  if (isAudio && id.isNotEmpty)
+                    AudioTranscriptionReview(
+                      apiService: widget.apiService,
+                      evidenceId: id,
+                    ),
+                ],
               );
             }),
           ],
         );
       },
+    );
+  }
+}
+
+class AudioTranscriptionReview extends StatefulWidget {
+  final ApiService apiService;
+  final String evidenceId;
+
+  const AudioTranscriptionReview({
+    super.key,
+    required this.apiService,
+    required this.evidenceId,
+  });
+
+  @override
+  State<AudioTranscriptionReview> createState() =>
+      _AudioTranscriptionReviewState();
+}
+
+class _AudioTranscriptionReviewState extends State<AudioTranscriptionReview> {
+  final Map<String, TextEditingController> _controllers = {};
+  List<Map<String, dynamic>> _transcripts = [];
+  String _language = 'auto';
+  String? _error;
+  bool _loading = true;
+  bool _transcribing = false;
+  final Set<String> _saving = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTranscripts();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadTranscripts() async {
+    final response = await widget.apiService.fetchEvidenceTranscripts(
+      widget.evidenceId,
+    );
+    if (!mounted) return;
+    if (response['success'] != true) {
+      setState(() {
+        _loading = false;
+        _error =
+            response['message']?.toString() ??
+            'Could not load transcript history.';
+      });
+      return;
+    }
+    final data = response['data'];
+    final rows = data is List ? data : const [];
+    setState(() {
+      _transcripts = rows
+          .whereType<Map>()
+          .where((row) => row.keys.every((key) => key is String))
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      _loading = false;
+      _error = null;
+    });
+  }
+
+  String _errorMessage(Map<String, dynamic> response) {
+    final data = response['data'];
+    final code = data is Map ? data['error_code']?.toString() : null;
+    return switch (code) {
+      'provider_timeout' => 'Speech recognition timed out. Try again later.',
+      'provider_request_failed' => 'Speech recognition rejected the request. Check the recording and try again.',
+      'no_speech_recognized' => 'No speech was recognized in this recording.',
+      'evidence_integrity_failed' =>
+        'The audio failed its integrity check and was not transcribed.',
+      'evidence_unavailable' => 'The original audio is unavailable.',
+      _ =>
+        response['message']?.toString() ??
+            (data is Map ? data['error']?.toString() : null) ??
+            'Could not transcribe this recording.',
+    };
+  }
+
+  Future<void> _transcribe() async {
+    setState(() {
+      _transcribing = true;
+      _error = null;
+    });
+    final response = await widget.apiService.transcribeEvidence(
+      widget.evidenceId,
+      language: _language,
+    );
+    if (!mounted) return;
+    if (response['success'] != true) {
+      setState(() {
+        _transcribing = false;
+        _error = _errorMessage(response);
+      });
+      await _loadTranscripts();
+      if (mounted) setState(() => _error = _errorMessage(response));
+      return;
+    }
+    setState(() => _transcribing = false);
+    await _loadTranscripts();
+  }
+
+  TextEditingController _controllerFor(Map<String, dynamic> transcript) {
+    final id = transcript['transcript_id']?.toString() ?? '';
+    return _controllers.putIfAbsent(
+      id,
+      () => TextEditingController(
+        text: (transcript['reviewed_transcript'] as String?)?.isNotEmpty == true
+            ? transcript['reviewed_transcript'] as String
+            : transcript['transcript']?.toString() ?? '',
+      ),
+    );
+  }
+
+  Future<void> _saveCorrection(Map<String, dynamic> transcript) async {
+    final id = transcript['transcript_id']?.toString() ?? '';
+    final controller = _controllerFor(transcript);
+    if (id.isEmpty || controller.text.trim().isEmpty || !_saving.add(id)) {
+      return;
+    }
+    setState(() {});
+    final response = await widget.apiService.reviewEvidenceTranscript(
+      transcriptId: id,
+      correctedText: controller.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _saving.remove(id);
+      if (response['success'] != true) {
+        _error =
+            response['message']?.toString() ??
+            'Could not save the human correction.';
+      } else {
+        _error = null;
+      }
+    });
+    if (response['success'] == true) await _loadTranscripts();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Speech-to-text (human review required)',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              DropdownButton<String>(
+                value: _language,
+                onChanged: _transcribing
+                    ? null
+                    : (value) => setState(() => _language = value ?? 'auto'),
+                items: const [
+                  DropdownMenuItem(value: 'auto', child: Text('Auto detect')),
+                  DropdownMenuItem(value: 'sw', child: Text('Kiswahili')),
+                  DropdownMenuItem(value: 'en', child: Text('English')),
+                ],
+              ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: _transcribing ? null : _transcribe,
+              icon: _transcribing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.graphic_eq),
+              label: Text(_transcribing ? 'Transcribing…' : 'Transcribe audio'),
+            ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if (_loading) const LinearProgressIndicator(),
+          for (final transcript in _transcripts) _transcriptCard(transcript),
+        ],
+      ),
+    );
+  }
+
+  Widget _transcriptCard(Map<String, dynamic> transcript) {
+    final id = transcript['transcript_id']?.toString() ?? '';
+    final status = transcript['status']?.toString() ?? 'unknown';
+    final language = transcript['language']?.toString() ?? 'not reported';
+    final history = transcript['history'] is List
+        ? transcript['history'] as List
+        : const [];
+    if (status != 'completed') {
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text('Transcription $status'),
+        subtitle: Text(transcript['error_code']?.toString() ?? ''),
+      );
+    }
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Machine transcript · $language',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(transcript['transcript']?.toString() ?? ''),
+            const SizedBox(height: 12),
+            const Text(
+              'Human correction',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _controllerFor(transcript),
+              minLines: 2,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'Review and correct the transcript',
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _saving.contains(id)
+                    ? null
+                    : () => _saveCorrection(transcript),
+                icon: _saving.contains(id)
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: const Text('Save correction'),
+              ),
+            ),
+            if (history.isNotEmpty) ...[
+              const Divider(),
+              const Text(
+                'Correction history',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              for (final revision in history.whereType<Map>())
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SelectableText(revision['text']?.toString() ?? ''),
+                ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

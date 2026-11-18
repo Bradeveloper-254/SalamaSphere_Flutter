@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -1056,8 +1059,19 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 }
                 final file = selectedFile!;
                 int? fileLength;
+                String? originalSha256;
                 try {
                   fileLength = await file.length();
+                  if (file.path != null) {
+                    originalSha256 = (await sha256
+                            .bind(File(file.path!).openRead())
+                            .first)
+                        .toString();
+                  } else {
+                    originalSha256 = sha256
+                        .convert(await file.readAsBytes())
+                        .toString();
+                  }
                 } catch (error) {
                   if (mounted) {
                     _showMessage(
@@ -1120,6 +1134,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                   shareWith: selectedShareWith,
                   trustedContactIds: selectedContactIds.toList(),
                   message: messageText,
+                  sha256Hash: originalSha256,
                 );
                 if (mounted) {
                   _showMessage(
@@ -2452,7 +2467,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           subtitle: Text(
-                            '${type ?? 'file'} · '
+                            '${type ?? 'file'} Â· '
                             '${evidence['verification_status'] ?? 'uploaded'}',
                           ),
                           trailing: PopupMenuButton<String>(
