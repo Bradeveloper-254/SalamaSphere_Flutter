@@ -109,7 +109,7 @@ class LocalDatabaseService {
 
     return openDatabase(
       path,
-      version: 6,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE incidents (
@@ -128,6 +128,7 @@ class LocalDatabaseService {
             sync_status TEXT NOT NULL DEFAULT 'pending',
             sync_state TEXT NOT NULL DEFAULT 'SAVED_LOCALLY',
             server_incident_id TEXT,
+            tracking_consent INTEGER NOT NULL DEFAULT 0,
             metadata_ack_status TEXT NOT NULL DEFAULT 'pending',
             audio_ack_status TEXT NOT NULL DEFAULT 'pending',
             evidence_hash_status TEXT NOT NULL DEFAULT 'pending',
@@ -168,6 +169,20 @@ class LocalDatabaseService {
             created_at TEXT NOT NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE evidence_media_cache (
+            cache_key TEXT PRIMARY KEY,
+            incident_id TEXT,
+            file_name TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            encrypted_bytes BLOB NOT NULL,
+            cached_at TEXT NOT NULL
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_evidence_media_incident ON evidence_media_cache(incident_id)',
+        );
+        await _createIncidentLocationQueue(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -283,8 +298,52 @@ class LocalDatabaseService {
             );
           }
         }
+        if (oldVersion < 7) {
+          // Keep remotely retrieved evidence in the encrypted app database so
+          // playback does not depend on expiring URLs or OS cache eviction.
+          await db.execute('''
+            CREATE TABLE evidence_media_cache (
+              cache_key TEXT PRIMARY KEY,
+              incident_id TEXT,
+              file_name TEXT NOT NULL,
+              mime_type TEXT NOT NULL,
+              encrypted_bytes BLOB NOT NULL,
+              cached_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute(
+            'CREATE INDEX idx_evidence_media_incident ON evidence_media_cache(incident_id)',
+          );
+        }
+        if (oldVersion < 8) {
+          await _createIncidentLocationQueue(db);
+        }
+        if (oldVersion < 9) {
+          await db.execute(
+            'ALTER TABLE incidents ADD COLUMN tracking_consent INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
+  }
+
+  Future<void> _createIncidentLocationQueue(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE incident_location_queue (
+        local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_location_id TEXT NOT NULL UNIQUE,
+        client_event_id TEXT NOT NULL,
+        server_incident_id TEXT,
+        encrypted_payload BLOB NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_sync_error TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX idx_location_queue_pending
+      ON incident_location_queue(sync_status, server_incident_id, local_id)
+    ''');
   }
 
   Future<int> saveIncident({
@@ -618,6 +677,138 @@ class LocalDatabaseService {
     );
   }
 
+  Future<int> setIncidentTrackingConsent({
+    required String clientEventId,
+    required bool enabled,
+  }) async {
+    final db = await database;
+    return db.update(
+      'incidents',
+      {'tracking_consent': enabled ? 1 : 0},
+      where: 'client_event_id = ?',
+      whereArgs: [clientEventId],
+    );
+  }
+
+  Future<int> saveIncidentLocationSample({
+    required String clientEventId,
+    required String clientLocationId,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
+    required DateTime capturedAt,
+    required String source,
+    double? speedMps,
+    double? bearingDegrees,
+  }) async {
+    final db = await database;
+    final incidentRows = await db.query(
+      'incidents',
+      columns: ['server_incident_id'],
+      where: 'client_event_id = ?',
+      whereArgs: [clientEventId],
+      limit: 1,
+    );
+    if (incidentRows.isEmpty) return 0;
+    final serverIncidentId = incidentRows.first['server_incident_id']?.toString();
+    final payload = <String, Object?>{
+      'latitude': latitude,
+      'longitude': longitude,
+      'accuracy_m': accuracy,
+      'captured_at': capturedAt.toUtc().toIso8601String(),
+      'source': source,
+      'speed_mps': speedMps,
+      'bearing_degrees': bearingDegrees,
+    };
+    await updateIncidentLocation(
+      clientEventId: clientEventId,
+      latitude: latitude,
+      longitude: longitude,
+      accuracy: accuracy,
+      capturedAt: capturedAt,
+      source: source,
+    );
+    return db.insert('incident_location_queue', {
+      'client_location_id': clientLocationId,
+      'client_event_id': clientEventId,
+      'server_incident_id': serverIncidentId,
+      'encrypted_payload': await _encryptPayload(payload),
+      'sync_status': 'pending',
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<int> attachPendingLocationsToServerIncident({
+    required String clientEventId,
+    required String serverIncidentId,
+  }) async {
+    final db = await database;
+    return db.update(
+      'incident_location_queue',
+      {'server_incident_id': serverIncidentId},
+      where: 'client_event_id = ?',
+      whereArgs: [clientEventId],
+    );
+  }
+
+  Future<List<Map<String, Object?>>> getPendingIncidentLocations({
+    int limit = 100,
+  }) async {
+    final db = await database;
+    final rows = await db.query(
+      'incident_location_queue',
+      where: "sync_status = 'pending' AND server_incident_id IS NOT NULL",
+      orderBy: 'local_id ASC',
+      limit: limit,
+    );
+    final pending = <Map<String, Object?>>[];
+    for (final row in rows) {
+      final payload = jsonDecode(
+        utf8.decode(await _decryptBytes(
+          List<int>.from(row['encrypted_payload'] as List),
+        )),
+      ) as Map<String, dynamic>;
+      pending.add({...row, ...payload});
+    }
+    return pending;
+  }
+
+  Future<int> markIncidentLocationSynced(String clientLocationId) async {
+    final db = await database;
+    return db.update(
+      'incident_location_queue',
+      {'sync_status': 'synced', 'last_sync_error': null},
+      where: 'client_location_id = ?',
+      whereArgs: [clientLocationId],
+    );
+  }
+
+  Future<int> markIncidentLocationFailed({
+    required String clientLocationId,
+    required String error,
+  }) async {
+    final db = await database;
+    return db.update(
+      'incident_location_queue',
+      {'last_sync_error': error},
+      where: 'client_location_id = ?',
+      whereArgs: [clientLocationId],
+    );
+  }
+
+  Future<int> markIncidentLocationRejected({
+    required String clientLocationId,
+    required String error,
+  }) async {
+    final db = await database;
+    return db.update(
+      'incident_location_queue',
+      {'sync_status': 'rejected', 'last_sync_error': error},
+      where: 'client_location_id = ?',
+      whereArgs: [clientLocationId],
+    );
+  }
+
   Future<Map<String, Object?>?> getIncident(String clientEventId) async {
     final db = await database;
     final rows = await db.query(
@@ -664,6 +855,39 @@ class LocalDatabaseService {
       'upload_status': 'pending',
       'created_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> cacheEvidenceMedia({
+    required String cacheKey,
+    required String fileName,
+    required String mimeType,
+    required List<int> bytes,
+    String? incidentId,
+  }) async {
+    if (cacheKey.isEmpty || bytes.isEmpty) {
+      throw ArgumentError('Evidence cache key and bytes must not be empty.');
+    }
+    final db = await database;
+    await db.insert('evidence_media_cache', {
+      'cache_key': cacheKey,
+      'incident_id': incidentId,
+      'file_name': fileName,
+      'mime_type': mimeType,
+      'encrypted_bytes': await _encryptBytes(bytes),
+      'cached_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Map<String, Object?>?> getCachedEvidenceMedia(String cacheKey) async {
+    final db = await database;
+    final rows = await db.query('evidence_media_cache',
+        where: 'cache_key = ?', whereArgs: [cacheKey], limit: 1);
+    if (rows.isEmpty) return null;
+    final row = Map<String, Object?>.from(rows.first);
+    row['bytes'] = await _decryptBytes(
+      List<int>.from(row.remove('encrypted_bytes') as List),
+    );
+    return row;
   }
 
   Future<Map<String, Object?>?> getIncidentAudio(String clientEventId) async {

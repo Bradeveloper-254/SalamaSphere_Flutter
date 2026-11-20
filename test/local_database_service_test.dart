@@ -98,4 +98,24 @@ void main() {
 
     expect(matching.length, 1);
   });
+
+  test('Evidence media cache retains encrypted media by stable ID', () async {
+    const bytes = <int>[82, 73, 70, 70, 1, 2, 3, 4];
+    await databaseService.cacheEvidenceMedia(
+      cacheKey: 'evidence:test-evidence-id',
+      incidentId: 'test-incident-id',
+      fileName: 'recording.wav',
+      mimeType: 'audio/wav',
+      bytes: bytes,
+    );
+
+    final cached = await databaseService.getCachedEvidenceMedia(
+      'evidence:test-evidence-id',
+    );
+
+    expect(cached?['incident_id'], 'test-incident-id');
+    expect(cached?['file_name'], 'recording.wav');
+    expect(cached?['mime_type'], 'audio/wav');
+    expect(cached?['bytes'], bytes);
+  });
 }

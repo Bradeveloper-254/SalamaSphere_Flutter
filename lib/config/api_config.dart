@@ -54,6 +54,11 @@ class ApiConfig {
   static String incidentDetailEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/';
 
+  static String incidentLocationsEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/locations/';
+  static String incidentLatestLocationEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/locations/latest/';
+
   static String incidentAudioEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/audio/';
 

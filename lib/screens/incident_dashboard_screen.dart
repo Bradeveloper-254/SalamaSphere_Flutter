@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import '../services/local_database_service.dart';
 import '../widgets/incident_media.dart';
 
 class IncidentDashboardScreen extends StatefulWidget {
@@ -389,7 +390,12 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
   Future<void> _playIncidentAudio() async {
     final id = _value(['id', 'incident_id', 'uuid']);
     if (id == 'Not available') return;
-    final result = await widget.apiService.fetchIncidentAudio(id);
+    final cacheKey = 'incident-audio:$id';
+    final local = await LocalDatabaseService.instance
+        .getCachedEvidenceMedia(cacheKey);
+    final result = local == null
+        ? await widget.apiService.fetchIncidentAudio(id)
+        : <String, dynamic>{'success': true, 'bytes': local['bytes']};
     if (!mounted) return;
     if (result['success'] != true) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -403,6 +409,15 @@ class _IncidentDetailsSheetState extends State<_IncidentDetailsSheet> {
     }
 
     try {
+      if (local == null) {
+        await LocalDatabaseService.instance.cacheEvidenceMedia(
+          cacheKey: cacheKey,
+          incidentId: id,
+          fileName: 'incident-$id-audio',
+          mimeType: result['mime_type']?.toString() ?? 'audio/wav',
+          bytes: List<int>.from(result['bytes'] as List),
+        );
+      }
       await _audioPlayer.stop();
       await _audioPlayer.play(
         BytesSource(

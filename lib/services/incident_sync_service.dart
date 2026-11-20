@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
@@ -226,6 +227,10 @@ class IncidentSyncService {
             clientEventId: eventId,
             serverIncidentId: serverIncidentId,
           );
+          await database.attachPendingLocationsToServerIncident(
+            clientEventId: eventId,
+            serverIncidentId: serverIncidentId,
+          );
           await database.markIncidentSynchronized(clientEventId: eventId);
         } else {
           allSucceeded = false;
@@ -250,6 +255,80 @@ class IncidentSyncService {
       }
     }
 
+    if (token.trim().isNotEmpty) {
+      await synchronizePendingLocations(token: token);
+    }
+
+    return allSucceeded;
+  }
+
+  Future<bool> synchronizePendingLocations({required String token}) async {
+    if (token.trim().isEmpty) return false;
+    final connectivity = await connectivityChecker();
+    if (connectivity.contains(ConnectivityResult.none)) return false;
+
+    final pending = await database.getPendingIncidentLocations();
+    var allSucceeded = true;
+    for (final location in pending) {
+      final clientLocationId = location['client_location_id'].toString();
+      final incidentId = location['server_incident_id']?.toString();
+      if (incidentId == null || incidentId.isEmpty) continue;
+      final payload = <String, dynamic>{
+        'client_location_id': clientLocationId,
+        'latitude': location['latitude'],
+        'longitude': location['longitude'],
+        'accuracy_m': location['accuracy_m'],
+        'captured_at': location['captured_at'],
+        'speed_mps': location['speed_mps'],
+        'bearing_degrees': location['bearing_degrees'],
+        'source': location['source'],
+      }..removeWhere((key, value) => value == null);
+
+      try {
+        final response = await client
+            .post(
+              Uri.parse(
+                '${ApiConfig.baseUrl}'
+                '${ApiConfig.incidentLocationsEndpoint(incidentId)}',
+              ),
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': 'Token $token',
+              },
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 20));
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          await database.markIncidentLocationSynced(clientLocationId);
+        } else if (response.statusCode == 409 ||
+            response.statusCode == 404 ||
+            response.statusCode == 403) {
+          await database.markIncidentLocationRejected(
+            clientLocationId: clientLocationId,
+            error: _responseErrorMessage(response.body),
+          );
+          if (response.statusCode == 409) {
+            // The incident has closed; do not keep retrying private location data.
+            allSucceeded = false;
+          }
+        } else {
+          allSucceeded = false;
+          await database.markIncidentLocationFailed(
+            clientLocationId: clientLocationId,
+            error: 'HTTP ${response.statusCode}: '
+                '${_responseErrorMessage(response.body)}',
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      } catch (error) {
+        allSucceeded = false;
+        await database.markIncidentLocationFailed(
+          clientLocationId: clientLocationId,
+          error: error.toString(),
+        );
+      }
+    }
     return allSucceeded;
   }
 

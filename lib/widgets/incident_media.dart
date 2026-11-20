@@ -6,9 +6,11 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/api_service.dart';
+import '../services/local_database_service.dart';
 
 String resolveEvidenceMimeType({String? mimeType, required String? fileName}) {
   if (mimeType != null &&
@@ -91,36 +93,57 @@ class _IncidentEvidenceListState extends State<IncidentEvidenceList> {
     final id = evidence['id']?.toString();
     if (id == null || id.isEmpty || !_openingEvidenceIds.add(id)) return;
     setState(() {});
-    final response = await widget.apiService.fetchEvidenceFile(id);
-    if (!mounted) return;
-    setState(() => _openingEvidenceIds.remove(id));
+    try {
+      final cacheKey = 'evidence:$id';
+      final local = await LocalDatabaseService.instance
+          .getCachedEvidenceMedia(cacheKey);
+      final response = local == null
+          ? await widget.apiService.fetchEvidenceFile(id)
+          : <String, dynamic>{
+              'success': true,
+              'bytes': local['bytes'],
+              'mime_type': local['mime_type'],
+            };
+      final bytes = response['bytes'];
+      if (response['success'] != true || bytes is! List<int> || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(response['message']?.toString() ??
+                'Could not load incident media.')),
+          );
+        }
+        return;
+      }
 
-    final bytes = response['bytes'];
-    if (response['success'] != true || bytes is! List<int> || bytes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            response['message']?.toString() ?? 'Could not load incident media.',
-          ),
-        ),
+      final fileName = evidence['original_filename']?.toString() ?? 'Incident media';
+      final mimeType = resolveEvidenceMimeType(
+        mimeType: response['mime_type']?.toString() ??
+            evidence['mime_type']?.toString(),
+        fileName: fileName,
       );
-      return;
+      if (local == null) {
+        await LocalDatabaseService.instance.cacheEvidenceMedia(
+          cacheKey: cacheKey,
+          incidentId: widget.incidentId,
+          fileName: fileName,
+          mimeType: mimeType,
+          bytes: bytes,
+        );
+      }
+      if (mounted) {
+        await showEvidenceMediaDialog(context,
+            fileName: fileName, mimeType: mimeType, bytes: bytes);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open incident media: $error')),
+        );
+      }
+    } finally {
+      _openingEvidenceIds.remove(id);
+      if (mounted) setState(() {});
     }
-
-    final fileName =
-        evidence['original_filename']?.toString() ?? 'Incident media';
-    final mimeType = resolveEvidenceMimeType(
-      mimeType:
-          response['mime_type']?.toString() ??
-          evidence['mime_type']?.toString(),
-      fileName: fileName,
-    );
-    await showEvidenceMediaDialog(
-      context,
-      fileName: fileName,
-      mimeType: mimeType,
-      bytes: bytes,
-    );
   }
 
   @override
@@ -523,6 +546,36 @@ Future<void> showEvidenceMediaDialog(
         bytes: bytes,
       ),
       actions: [
+        TextButton.icon(
+          onPressed: () async {
+            try {
+              final directory = await getTemporaryDirectory();
+              final safeName = path.basename(fileName).replaceAll(
+                RegExp(r'[^A-Za-z0-9._-]'),
+                '_',
+              );
+              final file = File(
+                path.join(
+                  directory.path,
+                  'salamasphere-share-${DateTime.now().microsecondsSinceEpoch}-$safeName',
+                ),
+              );
+              await file.writeAsBytes(bytes, flush: true);
+              await SharePlus.instance.share(ShareParams(
+                files: [XFile(file.path, mimeType: mimeType, name: fileName)],
+                subject: fileName,
+              ));
+            } catch (error) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not share this file: $error')),
+                );
+              }
+            }
+          },
+          icon: const Icon(Icons.share_outlined),
+          label: const Text('Share file'),
+        ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Close'),
@@ -553,7 +606,11 @@ class _EvidenceMediaPreviewState extends State<EvidenceMediaPreview> {
   VideoPlayerController? _videoController;
   File? _temporaryVideo;
   StreamSubscription<void>? _audioCompleteSubscription;
+  StreamSubscription<Duration>? _audioPositionSubscription;
+  StreamSubscription<Duration>? _audioDurationSubscription;
   bool _audioPlaying = false;
+  Duration _audioPosition = Duration.zero;
+  Duration _audioDuration = Duration.zero;
   String? _error;
 
   bool get _isVideo => widget.mimeType.startsWith('video/');
@@ -565,7 +622,16 @@ class _EvidenceMediaPreviewState extends State<EvidenceMediaPreview> {
       unawaited(_initializeVideo());
     } else {
       _audioCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
-        if (mounted) setState(() => _audioPlaying = false);
+        if (mounted) setState(() {
+          _audioPlaying = false;
+          _audioPosition = Duration.zero;
+        });
+      });
+      _audioPositionSubscription = _audioPlayer.onPositionChanged.listen((value) {
+        if (mounted) setState(() => _audioPosition = value);
+      });
+      _audioDurationSubscription = _audioPlayer.onDurationChanged.listen((value) {
+        if (mounted) setState(() => _audioDuration = value);
       });
     }
   }
@@ -622,9 +688,17 @@ class _EvidenceMediaPreviewState extends State<EvidenceMediaPreview> {
     }
   }
 
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.toString().padLeft(2, '0');
+    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
   @override
   void dispose() {
     _audioCompleteSubscription?.cancel();
+    _audioPositionSubscription?.cancel();
+    _audioDurationSubscription?.cancel();
     unawaited(_audioPlayer.dispose());
     final controller = _videoController;
     final file = _temporaryVideo;
@@ -688,16 +762,27 @@ class _EvidenceMediaPreviewState extends State<EvidenceMediaPreview> {
       );
     }
 
+    final durationMs = _audioDuration.inMilliseconds;
+    final positionMs = _audioPosition.inMilliseconds.clamp(0, durationMs);
     return SizedBox(
-      width: 320,
-      child: Row(
+      width: 360,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            onPressed: _togglePlayback,
-            icon: Icon(_audioPlaying ? Icons.pause : Icons.play_arrow),
-          ),
-          Expanded(
-            child: Text(_audioPlaying ? 'Playing audio' : 'Audio ready'),
+          Row(children: [
+            IconButton(
+              onPressed: _togglePlayback,
+              icon: Icon(_audioPlaying ? Icons.pause : Icons.play_arrow),
+            ),
+            Expanded(child: Text(_audioPlaying ? 'Playing audio' : 'Audio ready')),
+            Text('${_formatDuration(_audioPosition)} / ${_formatDuration(_audioDuration)}'),
+          ]),
+          Slider(
+            value: durationMs == 0 ? 0 : positionMs.toDouble(),
+            max: durationMs == 0 ? 1 : durationMs.toDouble(),
+            onChanged: durationMs == 0
+                ? null
+                : (value) => _audioPlayer.seek(Duration(milliseconds: value.round())),
           ),
         ],
       ),

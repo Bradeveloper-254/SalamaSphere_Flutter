@@ -652,6 +652,38 @@ class ApiService {
     return _requestJson('POST', ApiConfig.incidentsEndpoint, body: payload);
   }
 
+  Future<Map<String, dynamic>> submitIncidentLocation({
+    required String incidentId,
+    required Map<String, dynamic> location,
+  }) =>
+      _requestJson(
+        'POST',
+        ApiConfig.incidentLocationsEndpoint(incidentId),
+        body: location,
+      );
+
+  Future<Map<String, dynamic>> fetchLatestIncidentLocation(
+    String incidentId,
+  ) =>
+      _requestJson(
+        'GET',
+        ApiConfig.incidentLatestLocationEndpoint(incidentId),
+      );
+
+  Future<Map<String, dynamic>> fetchIncidentLocationHistory(
+    String incidentId, {
+    DateTime? before,
+    int limit = 100,
+  }) {
+    final query = <String, String>{'limit': '$limit'};
+    if (before != null) query['before'] = before.toUtc().toIso8601String();
+    final endpoint = Uri(
+      path: ApiConfig.incidentLocationsEndpoint(incidentId),
+      queryParameters: query,
+    );
+    return _requestJson('GET', endpoint.toString());
+  }
+
   Future<Map<String, dynamic>> uploadEvidenceVault({
     required String incidentId,
     List<int>? bytes,

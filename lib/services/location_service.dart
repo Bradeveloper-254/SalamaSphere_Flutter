@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
@@ -30,12 +31,18 @@ class IncidentLocation {
   final double longitude;
   final double accuracy;
   final DateTime capturedAt;
+  final double? speedMps;
+  final double? bearingDegrees;
+  final String source;
 
   const IncidentLocation({
     required this.latitude,
     required this.longitude,
     required this.accuracy,
     required this.capturedAt,
+    this.speedMps,
+    this.bearingDegrees,
+    this.source = 'phone_gps',
   });
 }
 
@@ -79,6 +86,45 @@ class LocationService {
     }
   }
 
+  Future<bool> ensureTrackingPermission() async {
+    if (!await Geolocator.isLocationServiceEnabled()) return false;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission != LocationPermission.denied &&
+        permission != LocationPermission.deniedForever;
+  }
+
+  Stream<IncidentLocation> watchIncidentLocation() async* {
+    if (!await ensureTrackingPermission()) {
+      throw StateError('Location permission or device location is unavailable.');
+    }
+    final LocationSettings settings = Platform.isAndroid
+        ? AndroidSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 25,
+            intervalDuration: const Duration(seconds: 30),
+            foregroundNotificationConfig: const ForegroundNotificationConfig(
+              notificationTitle: 'SalamaSphere SOS location sharing',
+              notificationText:
+                  'Your location is being shared with authorized responders.',
+              notificationChannelName: 'Active SOS location',
+              enableWakeLock: true,
+              setOngoing: true,
+            ),
+          )
+        : const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 25,
+          );
+    await for (final position in Geolocator.getPositionStream(
+      locationSettings: settings,
+    )) {
+      yield _toIncidentLocation(position);
+    }
+  }
+
   Future<IncidentLocation?> _freshLastKnownLocation() async {
     try {
       final position = await Geolocator.getLastKnownPosition();
@@ -98,6 +144,15 @@ class LocationService {
       longitude: position.longitude,
       accuracy: position.accuracy,
       capturedAt: position.timestamp.toUtc(),
+      speedMps: position.speed.isFinite && position.speed >= 0
+          ? position.speed
+          : null,
+      bearingDegrees: position.heading.isFinite &&
+              position.heading >= 0 &&
+              position.heading < 360
+          ? position.heading
+          : null,
+      source: 'phone_gps',
     );
   }
 }
