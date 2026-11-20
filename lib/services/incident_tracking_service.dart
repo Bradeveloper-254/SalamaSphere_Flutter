@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'location_service.dart';
 /// Owns the foreground GPS stream for the currently active SOS in this app
 /// process. Location samples are encrypted and queued before any network send.
 class IncidentTrackingService {
+  static const double earthRadiusMeters = 6371000;
   IncidentTrackingService._();
 
   static final IncidentTrackingService instance = IncidentTrackingService._();
@@ -121,7 +123,7 @@ class IncidentTrackingService {
     if (previous != null) {
       final elapsed = location.capturedAt.difference(previous.capturedAt);
       if (elapsed < const Duration(seconds: 20) &&
-          _distanceMeters(previous, location) < 25) {
+          distanceMeters(previous, location) < 25) {
         return;
       }
     }
@@ -180,18 +182,23 @@ class IncidentTrackingService {
     }
   }
 
-  double _distanceMeters(IncidentLocation a, IncidentLocation b) {
-    const earthRadius = 6371000.0;
-    final lat1 = a.latitude * 0.017453292519943295;
-    final lat2 = b.latitude * 0.017453292519943295;
-    final dLat = (b.latitude - a.latitude) * 0.017453292519943295;
-    final dLon = (b.longitude - a.longitude) * 0.017453292519943295;
-    final h = (1 - (1 - (dLat / 2).sin() * (dLat / 2).sin() -
-            (lat1.cos() * lat2.cos() *
-                (dLon / 2).sin() *
-                (dLon / 2).sin()))) /
-        2;
-    return earthRadius * 2 * h.sqrt().asin();
+  static double distanceMeters(IncidentLocation a, IncidentLocation b) {
+    _validate(a);
+    _validate(b);
+    final lat1 = a.latitude * math.pi / 180;
+    final lat2 = b.latitude * math.pi / 180;
+    final dLat = (b.latitude - a.latitude) * math.pi / 180;
+    final dLon = (b.longitude - a.longitude) * math.pi / 180;
+    final sinLat = math.sin(dLat / 2);
+    final sinLon = math.sin(dLon / 2);
+    final h = (sinLat * sinLat + math.cos(lat1) * math.cos(lat2) * sinLon * sinLon).clamp(0.0, 1.0);
+    return earthRadiusMeters * 2 * math.asin(math.sqrt(h));
+  }
+
+  static void _validate(IncidentLocation p) {
+    if (!p.latitude.isFinite || !p.longitude.isFinite || p.latitude < -90 || p.latitude > 90 || p.longitude < -180 || p.longitude > 180) {
+      throw ArgumentError('Invalid GPS coordinates.');
+    }
   }
 
   Future<void> dispose() async {
@@ -205,24 +212,4 @@ class IncidentTrackingService {
   }
 }
 
-extension on double {
-  double sin() => _sin(this);
-  double cos() => _cos(this);
-  double sqrt() => _sqrt(this);
-  double asin() => _asin(this);
-}
 
-// Dart's core library does not expose these methods on double; keep this
-// service independent from a math package in the location callback path.
-double _sin(double value) => _trig(value, 'sin');
-double _cos(double value) => _trig(value, 'cos');
-double _sqrt(double value) => _numeric(value, 'sqrt');
-double _asin(double value) => _trig(value, 'asin');
-
-double _trig(double value, String operation) {
-  // Replaced by dart:math in the import below at compile time.
-  throw UnsupportedError('Unimplemented $operation($value)');
-}
-
-double _numeric(double value, String operation) =>
-    throw UnsupportedError('Unimplemented $operation($value)');
