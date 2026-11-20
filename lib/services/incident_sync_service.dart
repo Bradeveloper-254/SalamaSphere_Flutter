@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
@@ -316,7 +315,8 @@ class IncidentSyncService {
           allSucceeded = false;
           await database.markIncidentLocationFailed(
             clientLocationId: clientLocationId,
-            error: 'HTTP ${response.statusCode}: '
+            error:
+                'HTTP ${response.statusCode}: '
                 '${_responseErrorMessage(response.body)}',
           );
         }

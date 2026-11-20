@@ -44,8 +44,7 @@ class IncidentTrackingService {
 
     final permitted = await _location.ensureTrackingPermission();
     if (!permitted) {
-      status.value =
-          'Location tracking is off. Enable phone location permission and GPS to share movement during this SOS.';
+      status.value = 'Location tracking is off. Enable phone location permission and GPS to share movement during this SOS.';
       return false;
     }
     final incident = await _database.getIncident(clientEventId);
@@ -60,13 +59,13 @@ class IncidentTrackingService {
     _clientEventId = clientEventId;
     _api = apiService;
     _sync = IncidentSyncService(database: _database);
-    _connectivitySubscription ??= Connectivity().onConnectivityChanged.listen(
-      (results) {
-        if (!results.contains(ConnectivityResult.none)) {
-          unawaited(_synchronizePending());
-        }
-      },
-    );
+    _connectivitySubscription ??= Connectivity().onConnectivityChanged.listen((
+      results,
+    ) {
+      if (!results.contains(ConnectivityResult.none)) {
+        unawaited(_synchronizePending());
+      }
+    });
     status.value = 'Live location sharing is active for this SOS.';
 
     _subscription = _location.watchIncidentLocation().listen(
@@ -167,9 +166,9 @@ class IncidentTrackingService {
       final currentId = _clientEventId;
       if (currentId != null) {
         final rows = await _database.getAllIncidents();
-        final incident = rows.where(
-          (row) => row['client_event_id'] == currentId,
-        ).firstOrNull;
+        final incident = rows
+            .where((row) => row['client_event_id'] == currentId)
+            .firstOrNull;
         if (incident?['tracking_consent'] == 0) {
           await stop(clearConsent: false);
           status.value = 'Location sharing stopped because the SOS was closed.';
@@ -191,12 +190,19 @@ class IncidentTrackingService {
     final dLon = (b.longitude - a.longitude) * math.pi / 180;
     final sinLat = math.sin(dLat / 2);
     final sinLon = math.sin(dLon / 2);
-    final h = (sinLat * sinLat + math.cos(lat1) * math.cos(lat2) * sinLon * sinLon).clamp(0.0, 1.0);
+    final h =
+        (sinLat * sinLat + math.cos(lat1) * math.cos(lat2) * sinLon * sinLon)
+            .clamp(0.0, 1.0);
     return earthRadiusMeters * 2 * math.asin(math.sqrt(h));
   }
 
   static void _validate(IncidentLocation p) {
-    if (!p.latitude.isFinite || !p.longitude.isFinite || p.latitude < -90 || p.latitude > 90 || p.longitude < -180 || p.longitude > 180) {
+    if (!p.latitude.isFinite ||
+        !p.longitude.isFinite ||
+        p.latitude < -90 ||
+        p.latitude > 90 ||
+        p.longitude < -180 ||
+        p.longitude > 180) {
       throw ArgumentError('Invalid GPS coordinates.');
     }
   }
@@ -211,5 +217,3 @@ class IncidentTrackingService {
     lastUpdate.dispose();
   }
 }
-
-

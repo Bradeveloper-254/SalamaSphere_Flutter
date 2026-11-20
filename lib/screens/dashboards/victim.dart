@@ -16,6 +16,7 @@ import '../../services/ble_service.dart';
 import '../../services/incident_sync_service.dart';
 import '../../services/local_database_service.dart';
 import '../../services/location_service.dart';
+import '../../services/incident_tracking_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/trusted_contact.dart';
 import '../../widgets/incident_media.dart';
@@ -437,6 +438,42 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       locationCapturedAt: location?.capturedAt,
       locationSource: location == null ? 'unavailable' : 'phone_gps',
     );
+    if (mounted && event.eventType.toUpperCase() == 'SOS') {
+      final consent = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Share location during this SOS?'),
+          content: const Text(
+            'If you agree, SalamaSphere will collect and securely queue location updates for this incident while tracking is active. You can stop sharing at any time.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Share location'),
+            ),
+          ],
+        ),
+      );
+      if (consent == true) {
+        final started = await IncidentTrackingService.instance
+            .startAfterConsent(
+              clientEventId: clientEventId,
+              apiService: widget.apiService,
+            );
+        if (!started && mounted) {
+          setState(
+            () => _wearableMessage =
+                IncidentTrackingService.instance.status.value ??
+                'Location sharing could not start.',
+          );
+        }
+      }
+    }
     _wearableEventsById.remove(event.eventId);
 
     if (event.callRequested) {
@@ -776,61 +813,68 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                                   icon: const Icon(Icons.edit_outlined),
                                 ),
                                 IconButton(
-                              tooltip: 'Delete ${contact.name}',
-                              onPressed: contact.id == null
-                                  ? null
-                                  : () async {
-                                      final confirmed = await showDialog<bool>(
-                                        context: dialogContext,
-                                        builder: (confirmContext) =>
-                                            AlertDialog(
-                                              title: const Text(
-                                                'Delete trusted contact?',
-                                              ),
-                                              content: Text(
-                                                'Remove ${contact.name} '
-                                                'from your trusted contacts?',
-                                              ),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                        confirmContext,
-                                                        false,
+                                  tooltip: 'Delete ${contact.name}',
+                                  onPressed: contact.id == null
+                                      ? null
+                                      : () async {
+                                          final confirmed =
+                                              await showDialog<bool>(
+                                                context: dialogContext,
+                                                builder: (confirmContext) =>
+                                                    AlertDialog(
+                                                      title: const Text(
+                                                        'Delete trusted contact?',
                                                       ),
-                                                  child: const Text('Cancel'),
-                                                ),
-                                                FilledButton(
-                                                  onPressed: () =>
-                                                      Navigator.pop(
-                                                        confirmContext,
-                                                        true,
+                                                      content: Text(
+                                                        'Remove ${contact.name} '
+                                                        'from your trusted contacts?',
                                                       ),
-                                                  child: const Text('Delete'),
-                                                ),
-                                              ],
-                                            ),
-                                      );
-                                      if (confirmed != true) return;
-                                      final result = await _notifications
-                                          .removeTrustedContact(contact.id!);
-                                      if (!dialogContext.mounted) return;
-                                      if (result['success'] == true) {
-                                        Navigator.pop(dialogContext);
-                                        _showMessage(
-                                          'Trusted contact deleted.',
-                                        );
-                                        await _manageTrustedContacts();
-                                      } else {
-                                        _showMessage(
-                                          result['message']?.toString() ?? 'Could not delete trusted contact.',
-                                        );
-                                      }
-                                    },
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.red,
-                              ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                confirmContext,
+                                                                false,
+                                                              ),
+                                                          child: const Text(
+                                                            'Cancel',
+                                                          ),
+                                                        ),
+                                                        FilledButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                confirmContext,
+                                                                true,
+                                                              ),
+                                                          child: const Text(
+                                                            'Delete',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                              );
+                                          if (confirmed != true) return;
+                                          final result = await _notifications
+                                              .removeTrustedContact(
+                                                contact.id!,
+                                              );
+                                          if (!dialogContext.mounted) return;
+                                          if (result['success'] == true) {
+                                            Navigator.pop(dialogContext);
+                                            _showMessage(
+                                              'Trusted contact deleted.',
+                                            );
+                                            await _manageTrustedContacts();
+                                          } else {
+                                            _showMessage(
+                                              result['message']?.toString() ?? 'Could not delete trusted contact.',
+                                            );
+                                          }
+                                        },
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.red,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1063,10 +1107,9 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 try {
                   fileLength = await file.length();
                   if (file.path != null) {
-                    originalSha256 = (await sha256
-                            .bind(File(file.path!).openRead())
-                            .first)
-                        .toString();
+                    originalSha256 =
+                        (await sha256.bind(File(file.path!).openRead()).first)
+                            .toString();
                   } else {
                     originalSha256 = sha256
                         .convert(await file.readAsBytes())
@@ -1170,7 +1213,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     var smsEnabled = existing?.smsEnabled ?? true;
     var consentConfirmed = existing?.consentConfirmed ?? false;
     var voiceCallsEnabled = existing?.receiveVoiceCalls ?? false;
-    var voiceConsentConfirmed = voiceCallsEnabled &&
+    var voiceConsentConfirmed =
+        voiceCallsEnabled &&
         existing?.voiceConsentConfirmedAt != null &&
         existing?.voiceConsentWithdrawnAt == null;
     var saving = false;
@@ -1187,7 +1231,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
             children: [
               Icon(Icons.person_add_alt_1, color: _brand),
               SizedBox(width: 10),
-              Text(existing == null ? 'Add trusted contact' : 'Edit trusted contact'),
+              Text(
+                existing == null
+                    ? 'Add trusted contact'
+                    : 'Edit trusted contact',
+              ),
             ],
           ),
           content: SingleChildScrollView(
