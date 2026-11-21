@@ -109,7 +109,7 @@ class LocalDatabaseService {
 
     return openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE incidents (
@@ -183,6 +183,7 @@ class LocalDatabaseService {
           'CREATE INDEX idx_evidence_media_incident ON evidence_media_cache(incident_id)',
         );
         await _createIncidentLocationQueue(db);
+        await _createBleTransferTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -323,6 +324,9 @@ class LocalDatabaseService {
             'ALTER TABLE incidents ADD COLUMN tracking_consent INTEGER NOT NULL DEFAULT 0',
           );
         }
+        if (oldVersion < 10) {
+          await _createBleTransferTables(db);
+        }
       },
     );
   }
@@ -344,6 +348,76 @@ class LocalDatabaseService {
       CREATE INDEX idx_location_queue_pending
       ON incident_location_queue(sync_status, server_incident_id, local_id)
     ''');
+  }
+
+  Future<void> _createBleTransferTables(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE ble_audio_transfers (
+        transfer_id TEXT PRIMARY KEY,
+        file_size INTEGER NOT NULL,
+        total_chunks INTEGER NOT NULL,
+        chunk_size INTEGER NOT NULL,
+        expected_crc32 INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'receiving',
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE ble_audio_chunks (
+        transfer_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        encrypted_bytes BLOB NOT NULL,
+        PRIMARY KEY (transfer_id, sequence),
+        FOREIGN KEY (transfer_id) REFERENCES ble_audio_transfers(transfer_id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> beginBleAudioTransfer({
+    required String transferId,
+    required int fileSize,
+    required int totalChunks,
+    required int chunkSize,
+    required int expectedCrc32,
+  }) async {
+    final db = await database;
+    await db.insert('ble_audio_transfers', {
+      'transfer_id': transferId,
+      'file_size': fileSize,
+      'total_chunks': totalChunks,
+      'chunk_size': chunkSize,
+      'expected_crc32': expectedCrc32,
+      'status': 'receiving',
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> saveBleAudioChunk({
+    required String transferId,
+    required int sequence,
+    required List<int> bytes,
+  }) async {
+    final db = await database;
+    await db.insert('ble_audio_chunks', {
+      'transfer_id': transferId,
+      'sequence': sequence,
+      'encrypted_bytes': await _encryptBytes(bytes),
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.update(
+      'ble_audio_transfers',
+      {'updated_at': DateTime.now().toUtc().toIso8601String()},
+      where: 'transfer_id = ?',
+      whereArgs: [transferId],
+    );
+  }
+
+  Future<void> clearBleAudioTransfer(String transferId) async {
+    final db = await database;
+    await db.delete(
+      'ble_audio_transfers',
+      where: 'transfer_id = ?',
+      whereArgs: [transferId],
+    );
   }
 
   Future<int> saveIncident({
@@ -710,7 +784,8 @@ class LocalDatabaseService {
       limit: 1,
     );
     if (incidentRows.isEmpty) return 0;
-    final serverIncidentId = incidentRows.first['server_incident_id']?.toString();
+    final serverIncidentId = incidentRows.first['server_incident_id']
+        ?.toString();
     final payload = <String, Object?>{
       'latitude': latitude,
       'longitude': longitude,
@@ -764,9 +839,9 @@ class LocalDatabaseService {
     final pending = <Map<String, Object?>>[];
     for (final row in rows) {
       final payload = jsonDecode(
-        utf8.decode(await _decryptBytes(
-          List<int>.from(row['encrypted_payload'] as List),
-        )),
+        utf8.decode(
+          await _decryptBytes(List<int>.from(row['encrypted_payload'] as List)),
+        ),
       ) as Map<String, dynamic>;
       pending.add({...row, ...payload});
     }
@@ -880,8 +955,12 @@ class LocalDatabaseService {
 
   Future<Map<String, Object?>?> getCachedEvidenceMedia(String cacheKey) async {
     final db = await database;
-    final rows = await db.query('evidence_media_cache',
-        where: 'cache_key = ?', whereArgs: [cacheKey], limit: 1);
+    final rows = await db.query(
+      'evidence_media_cache',
+      where: 'cache_key = ?',
+      whereArgs: [cacheKey],
+      limit: 1,
+    );
     if (rows.isEmpty) return null;
     final row = Map<String, Object?>.from(rows.first);
     row['bytes'] = await _decryptBytes(

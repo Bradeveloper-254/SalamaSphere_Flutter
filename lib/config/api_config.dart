@@ -58,6 +58,10 @@ class ApiConfig {
       '/api/incidents/$incidentId/locations/';
   static String incidentLatestLocationEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/locations/latest/';
+  static String liveAudioSessionEndpoint(String incidentId) =>
+      '/api/incidents/$incidentId/live-audio/';
+  static String liveAudioSignalsEndpoint(String sessionId) =>
+      '/api/incidents/live-audio/$sessionId/signals/';
 
   static String incidentAudioEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/audio/';

@@ -655,20 +655,39 @@ class ApiService {
   Future<Map<String, dynamic>> submitIncidentLocation({
     required String incidentId,
     required Map<String, dynamic> location,
-  }) =>
-      _requestJson(
-        'POST',
-        ApiConfig.incidentLocationsEndpoint(incidentId),
-        body: location,
-      );
+  }) => _requestJson(
+    'POST',
+    ApiConfig.incidentLocationsEndpoint(incidentId),
+    body: location,
+  );
 
-  Future<Map<String, dynamic>> fetchLatestIncidentLocation(
-    String incidentId,
-  ) =>
-      _requestJson(
-        'GET',
-        ApiConfig.incidentLatestLocationEndpoint(incidentId),
-      );
+  Future<Map<String, dynamic>> fetchLatestIncidentLocation(String incidentId) =>
+      _requestJson('GET', ApiConfig.incidentLatestLocationEndpoint(incidentId));
+
+  /// Creates a short-lived, incident-scoped signalling session. The returned
+  /// tokens are one-time bootstrap credentials; never store or log them.
+  Future<Map<String, dynamic>> createLiveAudioSession({
+    required String incidentId,
+    required bool victimConsent,
+  }) => _requestJson(
+    'POST',
+    ApiConfig.liveAudioSessionEndpoint(incidentId),
+    body: {'victim_consent': victimConsent},
+  );
+
+  Future<Map<String, dynamic>> fetchLiveAudioSignals(String sessionId) =>
+      _requestJson('GET', ApiConfig.liveAudioSignalsEndpoint(sessionId));
+
+  Future<Map<String, dynamic>> sendLiveAudioSignal({
+    required String sessionId,
+    required int sequence,
+    required String kind,
+    required Map<String, dynamic> payload,
+  }) => _requestJson(
+    'POST',
+    ApiConfig.liveAudioSignalsEndpoint(sessionId),
+    body: {'sequence': sequence, 'kind': kind, 'payload': payload},
+  );
 
   Future<Map<String, dynamic>> fetchIncidentLocationHistory(
     String incidentId, {

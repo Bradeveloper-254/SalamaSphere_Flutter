@@ -6,6 +6,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../models/wearable_event.dart';
 import 'audio_chunk_ack_tracker.dart';
+import 'local_database_service.dart';
 
 /// SalamaSphere BLE client for ESP32-S3 firmware v1.4.x.
 /// FILE_TRANSFER (0006) receives text control messages and binary audio packets.
@@ -20,6 +21,7 @@ class _AudioTransfer {
   final int expectedCrc32;
   final Uint8List bytes;
   final AudioChunkAckTracker ackTracker = AudioChunkAckTracker();
+  Future<void> persistenceQueue = Future<void>.value();
 
   _AudioTransfer({
     required this.eventId,
@@ -46,6 +48,7 @@ class BleService {
   static const String batteryUuid = '7b100008-5a1a-4d3e-9c2f-6b8e0d100008';
 
   static const int maxAudioBytes = 20 * 1024 * 1024;
+  final LocalDatabaseService _database = LocalDatabaseService.instance;
 
   final StreamController<WearableEvent> _events =
       StreamController<WearableEvent>.broadcast();
@@ -337,7 +340,7 @@ class BleService {
       return;
     }
     if (message.startsWith('COMPLETE:')) {
-      _completeAudioTransfer(message);
+      unawaited(_completeAudioTransfer(message));
       return;
     }
     if (message.startsWith('FILE:')) {
@@ -404,16 +407,26 @@ class BleService {
       return;
     }
 
-    // Fresh transfers only. Resume requires persisted partial data and
-    // matching byte-offset/sequence handling on both phone and firmware.
+    final expectedChunkCount =
+        (fileSize - startOffset + chunkSize - 1) ~/ chunkSize;
+    if (totalChunks != expectedChunkCount || startOffset % chunkSize != 0) {
+      _errors.add(const FormatException('Inconsistent audio chunk layout.'));
+      unawaited(_sendCommand('ABORT'));
+      _activeTransfer = null;
+      _activeTransferId = null;
+      return;
+    }
+
+    // The current app has no durable partial-file record to safely join to
+    // this resume. Abort it and restart from byte zero instead of accepting
+    // a partial buffer whose prefix cannot pass whole-file CRC verification.
     if (startOffset != 0) {
       _errors.add(
         StateError(
-          'ESP32 requested resume offset $startOffset; this build requires '
-          'a fresh transfer starting at offset zero.',
+          'Unsafe resume offset $startOffset; restarting recording from byte zero.',
         ),
       );
-      unawaited(_sendCommand('ABORT'));
+      unawaited(_restartTransferFromZero(eventId));
       _activeTransfer = null;
       _activeTransferId = null;
       return;
@@ -441,6 +454,14 @@ class BleService {
       startOffset: startOffset,
       expectedCrc32: expectedCrc,
     );
+    final transfer = _activeTransfer!;
+    transfer.persistenceQueue = _database.beginBleAudioTransfer(
+      transferId: eventId,
+      fileSize: fileSize,
+      totalChunks: totalChunks,
+      chunkSize: chunkSize,
+      expectedCrc32: expectedCrc,
+    );
 
     _metadata.add({
       'event_id': eventId,
@@ -455,6 +476,21 @@ class BleService {
       'crc32': fields[6],
     });
     _statuses.add('AUDIO_TRANSFER_STARTED:$eventId');
+  }
+
+  Future<void> _restartTransferFromZero(String eventId) async {
+    try {
+      await _sendCommand('ABORT');
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await _sendCommand('GET:$eventId');
+      _activeTransferId = eventId;
+      _statuses.add('AUDIO_TRANSFER_RESTARTED:$eventId');
+    } catch (error) {
+      _activeTransferId = null;
+      _errors.add(
+        StateError('Could not safely restart audio transfer: $error'),
+      );
+    }
   }
 
   void _queueCumulativeAck(
@@ -526,24 +562,41 @@ class BleService {
       return;
     }
 
-    transfer.bytes.setRange(offset, offset + payloadLength, packetBytes, 6);
-    final acknowledgement = transfer.ackTracker.recordReceived(sequence);
-    if (acknowledgement != null) {
-      _queueCumulativeAck(
-        acknowledgement,
-        transfer,
-        repeat: acknowledgement <= _lastAckQueued,
-      );
-    }
+    final payload = packetBytes.sublist(6);
+    // Do not ACK until encrypted local persistence has succeeded. This is
+    // intentionally serialized because notifications may arrive concurrently.
+    transfer.persistenceQueue = transfer.persistenceQueue
+        .then((_) async {
+          await _database.saveBleAudioChunk(
+            transferId: transfer.eventId,
+            sequence: sequence,
+            bytes: payload,
+          );
+          if (!identical(_activeTransfer, transfer)) return;
+          transfer.bytes.setRange(offset, offset + payloadLength, payload);
+          final acknowledgement = transfer.ackTracker.recordReceived(sequence);
+          if (acknowledgement != null) {
+            _queueCumulativeAck(
+              acknowledgement,
+              transfer,
+              repeat: acknowledgement <= _lastAckQueued,
+            );
+          }
+        })
+        .catchError((Object error) {
+          _errors.add(StateError('Could not persist audio packet: $error'));
+          unawaited(_sendCommand('ABORT'));
+        });
   }
 
-  void _completeAudioTransfer(String message) {
+  Future<void> _completeAudioTransfer(String message) async {
     final transfer = _activeTransfer;
     final fields = message.split(':');
     if (transfer == null || fields.length != 5) {
       _errors.add(const FormatException('Unexpected COMPLETE message.'));
       return;
     }
+    await transfer.persistenceQueue;
 
     final receivedSize = int.tryParse(fields[2]);
     final receivedChunks = int.tryParse(fields[3]);
@@ -574,6 +627,7 @@ class BleService {
       // Persist these bytes before calling acknowledgeAudioTransfer().
       _chunks.add(List<int>.unmodifiable(transfer.bytes));
       _statuses.add('AUDIO_TRANSFER_VERIFIED:${transfer.eventId}');
+      await _database.clearBleAudioTransfer(transfer.eventId);
     }
 
     _activeTransfer = null;

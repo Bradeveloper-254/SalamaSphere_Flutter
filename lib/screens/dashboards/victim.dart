@@ -102,6 +102,11 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     super.initState();
     _incidentSync = IncidentSyncService(database: _localDatabase);
     _notifications = NotificationService(widget.apiService);
+    unawaited(
+      IncidentTrackingService.instance.recoverAfterRestart(
+        apiService: widget.apiService,
+      ),
+    );
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
       _retryPendingUploads,
     );

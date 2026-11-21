@@ -24,6 +24,11 @@
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
         />
+    <!-- User-initiated SOS foreground location notification. Background
+         location is not requested; tracking does not resume after force-stop. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"

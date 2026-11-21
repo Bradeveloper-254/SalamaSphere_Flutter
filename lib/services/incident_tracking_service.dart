@@ -14,6 +14,10 @@ import 'location_service.dart';
 /// process. Location samples are encrypted and queued before any network send.
 class IncidentTrackingService {
   static const double earthRadiusMeters = 6371000;
+  static const Duration minimumSampleInterval = Duration(seconds: 20);
+  static const Duration maximumSampleAge = Duration(minutes: 2);
+  static const double maximumAccuracyMeters = 100;
+  static const double meaningfulMovementMeters = 10;
   IncidentTrackingService._();
 
   static final IncidentTrackingService instance = IncidentTrackingService._();
@@ -34,6 +38,30 @@ class IncidentTrackingService {
 
   bool get isTracking => _subscription != null;
   String? get activeClientEventId => _clientEventId;
+
+  /// Recover only a locally consented, still-open SOS after process recreation.
+  /// Consent is never inferred from location permission alone.
+  Future<bool> recoverAfterRestart({required ApiService apiService}) async {
+    if (_clientEventId != null) return isTracking;
+    final incidents = await _database.getAllIncidents();
+    for (final incident in incidents.reversed) {
+      final consent = incident['tracking_consent'];
+      final closed =
+          (incident['server_status']?.toString().toLowerCase() == 'closed') ||
+          incident['status']?.toString().toLowerCase() == 'closed';
+      final isSos =
+          incident['is_sos'] == true ||
+          incident['event_type']?.toString().toLowerCase() == 'sos' ||
+          incident['event_type']?.toString().toLowerCase() == 'emergency';
+      if ((consent == 1 || consent == true) && !closed && isSos) {
+        final id = incident['client_event_id']?.toString();
+        if (id != null && id.isNotEmpty) {
+          return startAfterConsent(clientEventId: id, apiService: apiService);
+        }
+      }
+    }
+    return false;
+  }
 
   Future<bool> startAfterConsent({
     required String clientEventId,
@@ -118,11 +146,24 @@ class IncidentTrackingService {
   Future<void> _recordLocation(IncidentLocation location) async {
     final clientEventId = _clientEventId;
     if (clientEventId == null) return;
+    final now = DateTime.now().toUtc();
+    if (!_isValidLocation(location) ||
+        location.capturedAt.isAfter(now.add(const Duration(seconds: 5))) ||
+        now.difference(location.capturedAt) > maximumSampleAge) {
+      status.value = 'GPS update rejected because its coordinates, accuracy, or timestamp are invalid or stale.';
+      return;
+    }
     final previous = _lastSavedLocation;
     if (previous != null) {
       final elapsed = location.capturedAt.difference(previous.capturedAt);
-      if (elapsed < const Duration(seconds: 20) &&
-          distanceMeters(previous, location) < 25) {
+      if (elapsed.isNegative) return;
+      // A poor fix cannot replace a better recent fix. Still retain a good
+      // update after the interval even when movement is small.
+      if (location.accuracy > previous.accuracy &&
+          elapsed < minimumSampleInterval)
+        return;
+      if (elapsed < minimumSampleInterval &&
+          distanceMeters(previous, location) < meaningfulMovementMeters) {
         return;
       }
     }
@@ -154,6 +195,17 @@ class IncidentTrackingService {
       status.value = 'Could not save a GPS update: $error';
     }
   }
+
+  static bool _isValidLocation(IncidentLocation point) =>
+      point.latitude.isFinite &&
+      point.longitude.isFinite &&
+      point.latitude >= -90 &&
+      point.latitude <= 90 &&
+      point.longitude >= -180 &&
+      point.longitude <= 180 &&
+      point.accuracy.isFinite &&
+      point.accuracy >= 0 &&
+      point.accuracy <= maximumAccuracyMeters;
 
   Future<void> _synchronizePending() async {
     if (_syncRunning) return;
