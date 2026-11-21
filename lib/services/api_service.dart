@@ -664,15 +664,26 @@ class ApiService {
   Future<Map<String, dynamic>> fetchLatestIncidentLocation(String incidentId) =>
       _requestJson('GET', ApiConfig.incidentLatestLocationEndpoint(incidentId));
 
-  /// Creates a short-lived, incident-scoped signalling session. The returned
-  /// tokens are one-time bootstrap credentials; never store or log them.
+  Future<Map<String, dynamic>> fetchIncidentDetail(String incidentId) =>
+      _requestJson('GET', ApiConfig.incidentDetailEndpoint(incidentId));
+
+  /// Creates a pending session. Only the authenticated incident owner can
+  /// approve it through [approveLiveAudioSession].
   Future<Map<String, dynamic>> createLiveAudioSession({
     required String incidentId,
-    required bool victimConsent,
   }) => _requestJson(
     'POST',
     ApiConfig.liveAudioSessionEndpoint(incidentId),
-    body: {'victim_consent': victimConsent},
+    body: const <String, dynamic>{},
+  );
+
+  Future<Map<String, dynamic>> approveLiveAudioSession({
+    required String sessionId,
+    required bool approve,
+  }) => _requestJson(
+    'POST',
+    ApiConfig.liveAudioApprovalEndpoint(sessionId),
+    body: {'approve': approve},
   );
 
   Future<Map<String, dynamic>> fetchLiveAudioSignals(String sessionId) =>

@@ -62,6 +62,8 @@ class ApiConfig {
       '/api/incidents/$incidentId/live-audio/';
   static String liveAudioSignalsEndpoint(String sessionId) =>
       '/api/incidents/live-audio/$sessionId/signals/';
+  static String liveAudioApprovalEndpoint(String sessionId) =>
+      '/api/incidents/live-audio/$sessionId/approval/';
 
   static String incidentAudioEndpoint(String incidentId) =>
       '/api/incidents/$incidentId/audio/';

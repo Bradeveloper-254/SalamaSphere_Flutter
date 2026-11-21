@@ -420,6 +420,45 @@ class LocalDatabaseService {
     );
   }
 
+  Future<void> markBleAudioTransferStatus({
+    required String transferId,
+    required String status,
+  }) async {
+    final db = await database;
+    await db.update(
+      'ble_audio_transfers',
+      {'status': status, 'updated_at': DateTime.now().toUtc().toIso8601String()},
+      where: 'transfer_id = ?',
+      whereArgs: [transferId],
+    );
+  }
+
+  /// Returns encrypted-at-rest chunks only after authentication-tag validation.
+  /// A corrupt chunk makes recovery fail rather than yielding partial evidence.
+  Future<Map<String, Object?>?> loadBleAudioTransfer(String transferId) async {
+    final db = await database;
+    final headers = await db.query(
+      'ble_audio_transfers',
+      where: 'transfer_id = ?',
+      whereArgs: [transferId],
+      limit: 1,
+    );
+    if (headers.isEmpty) return null;
+    final rows = await db.query(
+      'ble_audio_chunks',
+      where: 'transfer_id = ?',
+      whereArgs: [transferId],
+      orderBy: 'sequence ASC',
+    );
+    final chunks = <int, List<int>>{};
+    for (final row in rows) {
+      chunks[row['sequence'] as int] = await _decryptBytes(
+        List<int>.from(row['encrypted_bytes'] as List),
+      );
+    }
+    return {...headers.first, 'chunks': chunks};
+  }
+
   Future<int> saveIncident({
     required String clientEventId,
     required String deviceIdentifier,

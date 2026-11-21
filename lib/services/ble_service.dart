@@ -33,6 +33,20 @@ class _AudioTransfer {
   }) : bytes = Uint8List(fileSize);
 }
 
+class _RecoveredPrefix {
+  final int offset;
+  final Uint8List bytes;
+  final int fileSize;
+  final int expectedCrc32;
+
+  const _RecoveredPrefix({
+    required this.offset,
+    required this.bytes,
+    required this.fileSize,
+    required this.expectedCrc32,
+  });
+}
+
 class BleService {
   static const String deviceName = 'SalamaSphere';
 
@@ -69,6 +83,7 @@ class BleService {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final Set<String> _reportedEventKeys = <String>{};
   final List<String> _pendingTransferIds = <String>[];
+  final Map<String, _RecoveredPrefix> _recoveredPrefixes = {};
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _commands;
@@ -409,7 +424,7 @@ class BleService {
 
     final expectedChunkCount =
         (fileSize - startOffset + chunkSize - 1) ~/ chunkSize;
-    if (totalChunks != expectedChunkCount || startOffset % chunkSize != 0) {
+    if (totalChunks != expectedChunkCount) {
       _errors.add(const FormatException('Inconsistent audio chunk layout.'));
       unawaited(_sendCommand('ABORT'));
       _activeTransfer = null;
@@ -417,19 +432,16 @@ class BleService {
       return;
     }
 
-    // The current app has no durable partial-file record to safely join to
-    // this resume. Abort it and restart from byte zero instead of accepting
-    // a partial buffer whose prefix cannot pass whole-file CRC verification.
+    final recovered = _recoveredPrefixes.remove(eventId);
     if (startOffset != 0) {
-      _errors.add(
-        StateError(
-          'Unsafe resume offset $startOffset; restarting recording from byte zero.',
-        ),
-      );
-      unawaited(_restartTransferFromZero(eventId));
-      _activeTransfer = null;
-      _activeTransferId = null;
-      return;
+      if (recovered == null || recovered.offset != startOffset ||
+          recovered.fileSize != fileSize || recovered.expectedCrc32 != expectedCrc) {
+        _errors.add(StateError('Stored partial audio cannot safely resume; restarting from byte zero.'));
+        unawaited(_restartTransferFromZero(eventId));
+        _activeTransfer = null;
+        _activeTransferId = null;
+        return;
+      }
     }
 
     if (_activeTransferId != null &&
@@ -455,13 +467,17 @@ class BleService {
       expectedCrc32: expectedCrc,
     );
     final transfer = _activeTransfer!;
-    transfer.persistenceQueue = _database.beginBleAudioTransfer(
-      transferId: eventId,
-      fileSize: fileSize,
-      totalChunks: totalChunks,
-      chunkSize: chunkSize,
-      expectedCrc32: expectedCrc,
-    );
+    if (recovered != null) {
+      transfer.bytes.setRange(0, recovered.offset, recovered.bytes);
+    } else {
+      transfer.persistenceQueue = _database.beginBleAudioTransfer(
+        transferId: eventId,
+        fileSize: fileSize,
+        totalChunks: totalChunks,
+        chunkSize: chunkSize,
+        expectedCrc32: expectedCrc,
+      );
+    }
 
     _metadata.add({
       'event_id': eventId,
@@ -569,7 +585,9 @@ class BleService {
         .then((_) async {
           await _database.saveBleAudioChunk(
             transferId: transfer.eventId,
-            sequence: sequence,
+        // Persist absolute byte offset because firmware restarts sequence at
+        // zero after RESUME and its negotiated chunk size may change.
+        sequence: offset,
             bytes: payload,
           );
           if (!identical(_activeTransfer, transfer)) return;
@@ -627,7 +645,10 @@ class BleService {
       // Persist these bytes before calling acknowledgeAudioTransfer().
       _chunks.add(List<int>.unmodifiable(transfer.bytes));
       _statuses.add('AUDIO_TRANSFER_VERIFIED:${transfer.eventId}');
-      await _database.clearBleAudioTransfer(transfer.eventId);
+      await _database.markBleAudioTransferStatus(
+        transferId: transfer.eventId,
+        status: 'verified',
+      );
     }
 
     _activeTransfer = null;
@@ -670,7 +691,14 @@ class BleService {
     final transferId = _pendingTransferIds.removeAt(0);
     _activeTransferId = transferId;
     try {
-      await _sendCommand('GET:$transferId');
+      final recovery = await _restorePrefix(transferId);
+      if (recovery != null && recovery.offset > 0) {
+        _recoveredPrefixes[transferId] = recovery;
+        await _sendCommand('RESUME:$transferId:${recovery.offset}');
+        _statuses.add('AUDIO_TRANSFER_RESUMING:$transferId');
+      } else {
+        await _sendCommand('GET:$transferId');
+      }
     } catch (error) {
       _activeTransferId = null;
       _pendingTransferIds.insert(0, transferId);
@@ -680,10 +708,38 @@ class BleService {
     }
   }
 
+  Future<_RecoveredPrefix?> _restorePrefix(String transferId) async {
+    final stored = await _database.loadBleAudioTransfer(transferId);
+    if (stored == null || stored['status']?.toString() != 'receiving') {
+      return null;
+    }
+    final fileSize = stored['file_size'] as int;
+    final chunkSize = stored['chunk_size'] as int;
+    final expectedCrc = stored['expected_crc32'] as int;
+    final chunks = stored['chunks'] as Map<int, List<int>>;
+    final prefix = BytesBuilder(copy: false);
+    var offset = 0;
+    while (true) {
+      final chunk = chunks[offset];
+      if (chunk == null || chunk.length != chunkSize) break;
+      if (offset + chunk.length > fileSize) return null;
+      prefix.add(chunk);
+      offset += chunk.length;
+    }
+    if (prefix.isEmpty) return null;
+    return _RecoveredPrefix(
+      offset: prefix.length,
+      bytes: prefix.toBytes(),
+      fileSize: fileSize,
+      expectedCrc32: expectedCrc,
+    );
+  }
+
   /// Call only after the verified WAV has been durably saved.
   Future<void> acknowledgeAudioTransfer({required String transferId}) async {
     if (transferId.isEmpty) throw ArgumentError('transferId cannot be empty.');
     await _sendCommand('DONE:$transferId');
+    await _database.clearBleAudioTransfer(transferId);
   }
 
   /// Destructive operation: removes a recording from the wearable.
