@@ -160,8 +160,9 @@ class IncidentTrackingService {
       // A poor fix cannot replace a better recent fix. Still retain a good
       // update after the interval even when movement is small.
       if (location.accuracy > previous.accuracy &&
-          elapsed < minimumSampleInterval)
+          elapsed < minimumSampleInterval) {
         return;
+      }
       if (elapsed < minimumSampleInterval &&
           distanceMeters(previous, location) < meaningfulMovementMeters) {
         return;
