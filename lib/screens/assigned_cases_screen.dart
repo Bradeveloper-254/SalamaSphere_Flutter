@@ -175,6 +175,7 @@ class _AssignedCasesScreenState extends State<AssignedCasesScreen> {
               _detail('Occurred at', _formatDate(incident['occurred_at'])),
               _detail('Received at', _formatDate(incident['received_at'])),
               _detail('Description', incident['description']),
+              _detail('Survivor phone', incident['survivor_phone_number']),
               if (incidentId.isNotEmpty)
                 IncidentEvidenceList(
                   apiService: widget.apiService,

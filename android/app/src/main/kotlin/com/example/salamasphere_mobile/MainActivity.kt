@@ -5,6 +5,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.content.Intent
 import android.content.ClipData
+import android.os.Build
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.ArrayList
@@ -150,6 +151,25 @@ class MainActivity : FlutterActivity() {
                     putExtra(Intent.EXTRA_TEXT, text)
                 }, title))
                 result.success(null)
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.salamasphere/wearable_connection")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        val intent = Intent(this, WearableConnectionService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(null)
+                    }
+                    "stop" -> {
+                        stopService(Intent(this, WearableConnectionService::class.java))
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
             }
     }
 }

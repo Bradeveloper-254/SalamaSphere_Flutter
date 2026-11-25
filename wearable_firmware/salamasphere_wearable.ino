@@ -2006,7 +2006,7 @@ void markRecordingSent(const String& eventId) {
 
   if (!SD.exists(wav.c_str())) {
 
-    publishTransferMessage("ERROR:FILE_NOT_FOUND");
+    publishTransferMessage(String("ERROR:FILE_NOT_FOUND:") + eventId);
 
     return;
   }
@@ -2060,7 +2060,7 @@ void deleteRecording(const String& eventId) {
 
   if (target.length() == 0) {
 
-    publishTransferMessage("ERROR:FILE_NOT_FOUND");
+    publishTransferMessage(String("ERROR:FILE_NOT_FOUND:") + eventId);
 
     return;
   }

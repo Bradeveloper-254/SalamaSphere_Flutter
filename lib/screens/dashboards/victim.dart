@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../models/wearable_event.dart';
 import '../../services/api_service.dart';
@@ -452,7 +453,6 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     _expectedAudioBytes = null;
     _recordingComplete = false;
 
-    final location = await _locationService.captureLocation();
     await _localDatabase.saveIncident(
       clientEventId: clientEventId,
       deviceIdentifier: event.deviceIdentifier,
@@ -460,12 +460,13 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       capturedAt: event.timestamp,
       threatLevel: 'high',
       description: 'Wearable SOS event: ${event.eventId}',
-      latitude: location?.latitude,
-      longitude: location?.longitude,
-      locationAccuracy: location?.accuracy,
-      locationCapturedAt: location?.capturedAt,
-      locationSource: location == null ? 'unavailable' : 'phone_gps',
+      // Incident creation and emergency notification must not wait for GPS or
+      // for the wearable recording to finish. Location is attached as soon as
+      // the asynchronous capture completes.
+      locationSource: 'pending',
     );
+    unawaited(_captureInitialLocation(clientEventId));
+    unawaited(_synchronizeNewSosImmediately(clientEventId));
     if (mounted && event.eventType.toUpperCase() == 'SOS') {
       final consent = await showDialog<bool>(
         context: context,
@@ -592,6 +593,39 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       await _bleService.requestAudioTransfer(transferId: eventId);
     } catch (_) {
       _requestedAudioEventIds.remove(eventId);
+    }
+  }
+
+  Future<void> _captureInitialLocation(String clientEventId) async {
+    try {
+      final location = await _locationService.captureLocation();
+      if (location == null) return;
+      await _localDatabase.saveIncidentLocationSample(
+        clientEventId: clientEventId,
+        clientLocationId: const Uuid().v4(),
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        capturedAt: location.capturedAt,
+        source: 'phone_gps',
+      );
+      final token = widget.apiService.authToken;
+      if (token != null) {
+        await _incidentSync.synchronizePendingLocations(token: token);
+      }
+    } catch (_) {
+      // An SOS remains valid even if location permissions or GPS are absent.
+    }
+  }
+
+  Future<void> _synchronizeNewSosImmediately(String clientEventId) async {
+    final token = widget.apiService.authToken;
+    if (token == null) return;
+    try {
+      await _incidentSync.synchronizePendingIncidents(token: token);
+      if (mounted) await _loadIncidents();
+    } catch (_) {
+      // The encrypted local queue will retry on the next connectivity event.
     }
   }
 

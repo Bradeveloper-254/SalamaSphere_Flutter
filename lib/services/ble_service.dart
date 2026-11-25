@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../models/wearable_event.dart';
@@ -62,6 +63,9 @@ class BleService {
   static const String batteryUuid = '7b100008-5a1a-4d3e-9c2f-6b8e0d100008';
 
   static const int maxAudioBytes = 20 * 1024 * 1024;
+  static const MethodChannel _wearableConnectionChannel = MethodChannel(
+    'com.salamasphere/wearable_connection',
+  );
   final LocalDatabaseService _database = LocalDatabaseService.instance;
 
   final StreamController<WearableEvent> _events =
@@ -152,6 +156,7 @@ class BleService {
 
     _device = device;
     _connected = true;
+    await _setBackgroundConnectionProtection(true);
     _connectionStates.add(true);
 
     _subscriptions.add(
@@ -161,6 +166,7 @@ class BleService {
         _connected = connected;
         _connectionStates.add(connected);
         if (!connected) {
+          unawaited(_setBackgroundConnectionProtection(false));
           _activeTransfer = null;
           _activeTransferId = null;
           _pendingTransferIds.clear();
@@ -799,6 +805,7 @@ class BleService {
     final device = _device;
     _device = null;
     _connected = false;
+    await _setBackgroundConnectionProtection(false);
     _connectionStates.add(false);
 
     _commands = null;
@@ -842,6 +849,17 @@ class BleService {
     await _connectionStates.close();
     await _battery.close();
     await _recordings.close();
+  }
+
+  Future<void> _setBackgroundConnectionProtection(bool enabled) async {
+    try {
+      await _wearableConnectionChannel.invokeMethod<void>(
+        enabled ? 'start' : 'stop',
+      );
+    } on PlatformException {
+      // Only Android provides the foreground service; other targets continue
+      // with their platform's normal BLE lifecycle.
+    }
   }
 
   /// Kept for compatibility with existing callers.
