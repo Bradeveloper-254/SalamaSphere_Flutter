@@ -87,6 +87,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   final List<int> _audioBytes = <int>[];
   bool _recordingComplete = false;
   bool _audioSaveInProgress = false;
+  String? _receivingAudioTransferId;
   String? _activeWearableEventId;
   final Set<String> _requestedAudioEventIds = <String>{};
   final Map<String, WearableEvent> _wearableEventsById =
@@ -302,12 +303,27 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         metadata,
       ) {
         if (!mounted) return;
+        final transferId = metadata['transfer_id']?.toString();
+        final isTransferStart = metadata.containsKey('total_chunks') &&
+            metadata.containsKey('crc32');
         final expected =
             metadata['size'] ??
             metadata['length'] ??
             metadata['total_bytes'] ??
             metadata['file_size'];
         setState(() {
+          // Only a START message is authoritative for incoming bytes. The
+          // readable metadata characteristic can still hold a previous SOS,
+          // so it must not append a new recording to old audio state.
+          if (isTransferStart &&
+              transferId != null &&
+              transferId.isNotEmpty &&
+              transferId != _receivingAudioTransferId) {
+            _receivingAudioTransferId = transferId;
+            _audioBytes.clear();
+            _recordingComplete = false;
+            _audioSaveInProgress = false;
+          }
           _audioTransferMetadata = metadata;
           _expectedAudioBytes = int.tryParse(expected?.toString() ?? '');
         });
@@ -364,6 +380,13 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
               );
             }
             if (!connected) _requestedAudioEventIds.clear();
+            if (!connected) {
+              _receivingAudioTransferId = null;
+              _audioBytes.clear();
+              _audioTransferMetadata = null;
+              _expectedAudioBytes = null;
+              _recordingComplete = false;
+            }
           });
       _bleErrorSubscription ??= _bleService.errors.listen((error) {
         _requestedAudioEventIds.remove(_activeWearableEventId);
@@ -643,10 +666,10 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       _wearableMessage = 'Recording transfer: $status';
     });
 
-    if ((status == 'SAVED' || status == 'SAVED_PARTIAL') &&
-        _activeWearableEventId != null) {
-      unawaited(_requestAudioForEvent(_activeWearableEventId!));
-    }
+    // SAVED is only a state string and does not contain an event ID. Do not
+    // send GET using _activeWearableEventId here: after a reconnect or a prior
+    // SOS it may identify an old file. The firmware auto-pushes new WAV files,
+    // and the verified START metadata supplies the authoritative transfer ID.
   }
 
   void _maybeSaveAndUploadAudio() {
@@ -656,6 +679,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     if (!_recordingComplete ||
         transferId == null ||
         transferId.isEmpty ||
+        transferId != _receivingAudioTransferId ||
         _audioTransferMetadata == null ||
         expected == null ||
         expected <= 0 ||

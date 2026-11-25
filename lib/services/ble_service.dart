@@ -376,6 +376,29 @@ class BleService {
       return;
     }
     if (message.startsWith('ERROR:')) {
+      final fields = message.split(':');
+      final failedEventId = fields.length >= 3 && fields[2].startsWith('SALAMA-')
+          ? fields[2]
+          : null;
+      final activeEventId = _activeTransfer?.eventId ?? _activeTransferId;
+
+      // Older firmware can report an unqualified FILE_NOT_FOUND after a
+      // queued stale GET, even while an unsolicited transfer for a newer
+      // recording is completing. That response does not belong to the active
+      // transfer and must not discard its verified bytes or its ACK state.
+      if (failedEventId != null &&
+          activeEventId != null &&
+          failedEventId != activeEventId) {
+        _statuses.add('IGNORED_TRANSFER_ERROR:$message');
+        return;
+      }
+      if (failedEventId == null &&
+          message == 'ERROR:FILE_NOT_FOUND' &&
+          _activeTransfer != null) {
+        _statuses.add('IGNORED_STALE_TRANSFER_ERROR:$message');
+        return;
+      }
+
       _errors.add(StateError('ESP32 transfer message: $message'));
       _activeTransfer = null;
       _activeTransferId = null;

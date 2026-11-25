@@ -6,7 +6,7 @@
 #include <NimBLEDevice.h>
 
 // ============================================================
-// SALAMASPHERE - DAY 10 (v1.4.0)
+// SALAMASPHERE - DAY 10 (v1.4.3)
 // TWO-MODE SOS + AUTO BLE TRANSFER + PHONE-CALL REQUEST
 // Board: ESP32-S3 N16R8      Library: NimBLE-Arduino 2.5.1
 // ============================================================
@@ -55,7 +55,8 @@
 //   START:<id>:<size>:<chunks>:<chunkSize>:<startOffset>:<crc32hex>
 //   <binary chunk> = 4-byte seq LE + 2-byte len LE + payload
 //   COMPLETE:<id>:<size>:<chunks>:<crc32hex>
-//   ERROR:<reason>[:<detail>[:<resumeOffset>]]
+//   ERROR:<reason>[:<event_id>[:<detail>[:<resumeOffset>]]]
+//   STATUS:STALE_REQUEST_IGNORED:<requested_id>:<preferred_id>
 //   FILE:<id>:<size> ... LIST_END:<count>   STATUS:<state>
 //   MARKED:<id>   DELETED:<id>
 //
@@ -87,7 +88,7 @@
 
 #define DEVICE_NAME      "SalamaSphere"
 #define DEVICE_ID        "SALAMA-DEVICE-001"
-#define FIRMWARE_VERSION "1.4.2"
+#define FIRMWARE_VERSION "1.4.3"
 
 // ---------------- AUDIO CONFIGURATION -----------------------
 
@@ -290,6 +291,11 @@ void deleteRecording(const String& eventId);
 void markRecordingSent(const String& eventId);
 void trimSentFiles(int keep);
 String findPendingRecording();
+bool deferStaleTransferRequest(const String& requestedEventId);
+void publishStaleTransferRequestIgnored(
+  const String& requestedEventId,
+  const String& preferredEventId
+);
 
 ButtonAction pollButton(unsigned long& pressMs);
 SosMode interpretIdleGesture(ButtonAction action, unsigned long pressMs);
@@ -1456,6 +1462,39 @@ ChunkResult sendAudioChunk(
 // Returns true only when COMPLETE was sent.
 // ============================================================
 
+// A `SAVED` status characteristic has no event id. An older Android app can
+// therefore issue GET/RESUME for the previous SOS while the newest recording
+// is waiting for its automatic push. Do not let that stale queued request turn
+// into FILE_NOT_FOUND after the valid transfer completes. The newest pending
+// WAV remains the source of truth and will be sent automatically.
+bool deferStaleTransferRequest(const String& requestedEventId) {
+
+  if (!autoPushPending || !sdReady) {
+    return false;
+  }
+
+  String preferredEventId = findPendingRecording();
+
+  return preferredEventId.length() > 0 &&
+         requestedEventId != preferredEventId;
+}
+
+void publishStaleTransferRequestIgnored(
+  const String& requestedEventId,
+  const String& preferredEventId
+) {
+
+  publishTransferMessage(
+    String("STATUS:STALE_REQUEST_IGNORED:") +
+    requestedEventId + ":" + preferredEventId
+  );
+
+  Serial.print("Ignored stale transfer request for ");
+  Serial.print(requestedEventId);
+  Serial.print("; automatic transfer will send ");
+  Serial.println(preferredEventId);
+}
+
 bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
   if (!deviceConnected) {
@@ -1474,7 +1513,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
   if (!isValidEventId(eventId)) {
 
-    publishTransferMessage("ERROR:INVALID_EVENT_ID");
+    publishTransferMessage(String("ERROR:INVALID_EVENT_ID:") + eventId);
 
     return false;
   }
@@ -1510,7 +1549,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
   if (!SD.exists(filename.c_str())) {
 
-    publishTransferMessage("ERROR:FILE_NOT_FOUND");
+    publishTransferMessage(String("ERROR:FILE_NOT_FOUND:") + eventId);
 
     return false;
   }
@@ -1519,7 +1558,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
   if (!file) {
 
-    publishTransferMessage("ERROR:OPEN_FAILED");
+    publishTransferMessage(String("ERROR:OPEN_FAILED:") + eventId);
 
     return false;
   }
@@ -1530,7 +1569,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
     file.close();
 
-    publishTransferMessage("ERROR:INVALID_WAV_SIZE");
+    publishTransferMessage(String("ERROR:INVALID_WAV_SIZE:") + eventId);
 
     return false;
   }
@@ -1539,7 +1578,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
     file.close();
 
-    publishTransferMessage("ERROR:BAD_OFFSET");
+    publishTransferMessage(String("ERROR:BAD_OFFSET:") + eventId);
 
     return false;
   }
@@ -1559,7 +1598,7 @@ bool transferAudioFile(const String& eventId, uint32_t startOffset) {
 
     file.close();
 
-    publishTransferMessage("ERROR:SEEK_FAILED");
+    publishTransferMessage(String("ERROR:SEEK_FAILED:") + eventId);
 
     return false;
   }
@@ -2058,6 +2097,11 @@ void processPendingCommand() {
 
     eventId.trim();
 
+    if (deferStaleTransferRequest(eventId)) {
+      publishStaleTransferRequestIgnored(eventId, findPendingRecording());
+      return;
+    }
+
     transferAudioFile(eventId, 0);
 
     return;
@@ -2093,6 +2137,11 @@ void processPendingCommand() {
     }
 
     uint32_t offset = (uint32_t)strtoul(offsetText.c_str(), nullptr, 10);
+
+    if (deferStaleTransferRequest(eventId)) {
+      publishStaleTransferRequestIgnored(eventId, findPendingRecording());
+      return;
+    }
 
     transferAudioFile(eventId, offset);
 
