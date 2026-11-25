@@ -864,6 +864,8 @@ class ApiService {
             response.headers['content-type'] ?? 'application/octet-stream',
         'message': success
             ? 'Evidence retrieved successfully.'
+            : errorDetail.isNotEmpty
+            ? errorDetail
             : 'Could not retrieve evidence (HTTP ${response.statusCode}).',
       };
     } catch (error) {
@@ -1067,6 +1069,21 @@ class ApiService {
           .timeout(const Duration(seconds: 30));
 
       final success = response.statusCode >= 200 && response.statusCode < 300;
+
+      String errorDetail = '';
+
+      if (!success) {
+        try {
+          final decoded = jsonDecode(response.body);
+
+          errorDetail = decoded is Map<String, dynamic>
+              ? _registrationErrorMessage(decoded)
+              : response.body.trim();
+        } catch (_) {
+          errorDetail = response.body.trim();
+        }
+      }
+
       return {
         'success': success,
         'status_code': response.statusCode,
@@ -1075,8 +1092,9 @@ class ApiService {
             response.headers['content-type'] ?? 'application/octet-stream',
         'message': success
             ? 'Incident audio retrieved successfully.'
-            : 'Could not retrieve incident audio'
-                  '${errorDetail.isEmpty ? '.' : ': $errorDetail'}',
+            : errorDetail.isNotEmpty
+            ? errorDetail
+            : 'Could not retrieve incident audio (HTTP ${response.statusCode}).',
       };
     } catch (error) {
       return {
