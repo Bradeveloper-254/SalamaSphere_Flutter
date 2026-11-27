@@ -49,7 +49,17 @@ class _RecoveredPrefix {
 }
 
 class BleService {
-  static const String deviceName = 'SalamaSphere';
+  // The production firmware advertises this name. The AI-GBVT aliases are
+  // retained only for boards that have not yet been reflashed.
+  static const Set<String> deviceNames = <String>{
+    'SalamaSphere',
+    'AI-GBVT',
+    'AI-GBVT Tracker',
+  };
+
+  static bool _isSupportedDeviceName(String name) => deviceNames.any(
+    (candidate) => candidate.toLowerCase() == name.trim().toLowerCase(),
+  );
 
   static const String serviceUuid = '7b100001-5a1a-4d3e-9c2f-6b8e0d100001';
   static const String deviceIdUuid = '7b100002-5a1a-4d3e-9c2f-6b8e0d100002';
@@ -132,14 +142,20 @@ class BleService {
     _subscriptions.add(
       FlutterBluePlus.onScanResults.listen((results) {
         for (final result in results) {
-          if (result.advertisementData.advName == deviceName ||
-              result.device.platformName == deviceName) {
+          final advertisesSalamaService = result.advertisementData.serviceUuids
+              .any((uuid) => uuid.str.toLowerCase() == serviceUuid);
+          if (advertisesSalamaService ||
+              _isSupportedDeviceName(result.advertisementData.advName) ||
+              _isSupportedDeviceName(result.device.platformName)) {
             if (!found.isCompleted) found.complete(result.device);
           }
         }
       }, onError: _errors.add),
     );
 
+    // Some ESP32/NimBLE builds place their 128-bit UUID only in the scan
+    // response, which Android does not reliably expose to filtered scans.
+    // Discover by the known device name and validate the GATT service below.
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 12));
 
     BluetoothDevice device;
@@ -188,7 +204,8 @@ class BleService {
     );
     if (matching.isEmpty) {
       throw StateError(
-        'SalamaSphere BLE service not found. Check firmware UUID.',
+        'SalamaSphere BLE service not found. Flash the production '
+        'salamasphere_wearable.ino firmware (service UUID $serviceUuid).',
       );
     }
 
@@ -383,7 +400,8 @@ class BleService {
     }
     if (message.startsWith('ERROR:')) {
       final fields = message.split(':');
-      final failedEventId = fields.length >= 3 && fields[2].startsWith('SALAMA-')
+      final failedEventId =
+          fields.length >= 3 && fields[2].startsWith('SALAMA-')
           ? fields[2]
           : null;
       final activeEventId = _activeTransfer?.eventId ?? _activeTransferId;
@@ -463,9 +481,15 @@ class BleService {
 
     final recovered = _recoveredPrefixes.remove(eventId);
     if (startOffset != 0) {
-      if (recovered == null || recovered.offset != startOffset ||
-          recovered.fileSize != fileSize || recovered.expectedCrc32 != expectedCrc) {
-        _errors.add(StateError('Stored partial audio cannot safely resume; restarting from byte zero.'));
+      if (recovered == null ||
+          recovered.offset != startOffset ||
+          recovered.fileSize != fileSize ||
+          recovered.expectedCrc32 != expectedCrc) {
+        _errors.add(
+          StateError(
+            'Stored partial audio cannot safely resume; restarting from byte zero.',
+          ),
+        );
         unawaited(_restartTransferFromZero(eventId));
         _activeTransfer = null;
         _activeTransferId = null;
@@ -614,9 +638,9 @@ class BleService {
         .then((_) async {
           await _database.saveBleAudioChunk(
             transferId: transfer.eventId,
-        // Persist absolute byte offset because firmware restarts sequence at
-        // zero after RESUME and its negotiated chunk size may change.
-        sequence: offset,
+            // Persist absolute byte offset because firmware restarts sequence at
+            // zero after RESUME and its negotiated chunk size may change.
+            sequence: offset,
             bytes: payload,
           );
           if (!identical(_activeTransfer, transfer)) return;
@@ -857,6 +881,9 @@ class BleService {
         enabled ? 'start' : 'stop',
       );
     } on PlatformException {
+      // Only Android provides the foreground service; other targets continue
+      // with their platform's normal BLE lifecycle.
+    } on MissingPluginException {
       // Only Android provides the foreground service; other targets continue
       // with their platform's normal BLE lifecycle.
     }

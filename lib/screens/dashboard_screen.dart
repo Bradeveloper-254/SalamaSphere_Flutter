@@ -295,7 +295,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SalamaSphere'),
+        title: const Text('AI-GBVT Dashboard'),
         actions: [
           IconButton(
             onPressed: logout,

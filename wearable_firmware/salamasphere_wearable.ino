@@ -6,7 +6,7 @@
 #include <NimBLEDevice.h>
 
 // ============================================================
-// SALAMASPHERE - DAY 10 (v1.4.3)
+// AI-GBVT Tracker - DAY 10 (v1.4.3)
 // TWO-MODE SOS + AUTO BLE TRANSFER + PHONE-CALL REQUEST
 // Board: ESP32-S3 N16R8      Library: NimBLE-Arduino 2.5.1
 // ============================================================
@@ -86,8 +86,8 @@
 
 // ---------------- DEVICE CONFIGURATION ----------------------
 
-#define DEVICE_NAME      "SalamaSphere"
-#define DEVICE_ID        "SALAMA-DEVICE-001"
+#define DEVICE_NAME      "AI-GBVT Tracker"
+#define DEVICE_ID        "AI-GBVT-001"
 #define FIRMWARE_VERSION "1.4.3"
 
 // ---------------- AUDIO CONFIGURATION -----------------------
@@ -545,7 +545,7 @@ String generateEventId() {
   snprintf(
     id,
     sizeof(id),
-    "SALAMA-%08lX-%08lX-%04lX",
+    "AI-GBVT-%08lX-%08lX-%04lX",
     (unsigned long)(ESP.getEfuseMac() & 0xFFFFFFFF),
     (unsigned long)randomPart,
     (unsigned long)(eventCounter & 0xFFFF)
@@ -560,7 +560,7 @@ bool isValidEventId(const String& id) {
     return false;
   }
 
-  if (!id.startsWith("SALAMA-")) {
+  if (!id.startsWith("AI-GBVT-")) {
     return false;
   }
 
@@ -1279,7 +1279,7 @@ void generateSosEvent(SosMode mode, unsigned long holdDuration) {
 
   Serial.println();
   Serial.println("==================================");
-  Serial.println(activeCallMode ? "SALAMASPHERE SOS (CALL MODE)" : "SALAMASPHERE SOS (STANDARD)");
+  Serial.println(activeCallMode ? "AI-GBVT SOS (CALL MODE)" : "AI-GBVT SOS (STANDARD)");
   Serial.println("==================================");
 
   Serial.print("Event ID: ");
@@ -1864,7 +1864,7 @@ void listRecordings() {
 
       String name = stripLeadingSlash(String(entry.name()));
 
-      if (name.startsWith("SALAMA-") && name.endsWith(".wav")) {
+      if (name.startsWith("AI-GBVT-") && name.endsWith(".wav")) {
 
         String id = name.substring(0, name.length() - 4);
 
@@ -1915,7 +1915,7 @@ String findPendingRecording() {
 
       String name = stripLeadingSlash(String(entry.name()));
 
-      if (name.startsWith("SALAMA-") && name.endsWith(".wav")) {
+      if (name.startsWith("AI-GBVT-") && name.endsWith(".wav")) {
 
         String id = name.substring(0, name.length() - 4);
 
@@ -2301,7 +2301,7 @@ void setup() {
 
   Serial.println();
   Serial.println("==================================");
-  Serial.println("SalamaSphere Day 10 v" FIRMWARE_VERSION);
+  Serial.println("AI-GBVT Tracker Day 10 v" FIRMWARE_VERSION);
   Serial.println("==================================");
 
   buildCrcTable();

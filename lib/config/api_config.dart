@@ -1,6 +1,9 @@
 class ApiConfig {
-  // Production Django API hosted on Render
-  static const String baseUrl = 'https://salamasphere-api.onrender.com';
+  // Override with --dart-define=API_BASE_URL=...
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://salamasphere-api.onrender.com',
+  );
 
   static const String loginEndpoint = '/api/accounts/login/';
   static const String currentUserEndpoint = '/api/accounts/me/';

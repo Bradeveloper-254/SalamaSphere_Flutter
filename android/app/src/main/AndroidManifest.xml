@@ -35,7 +35,7 @@
         android:name="android.hardware.bluetooth_le"
         android:required="false" />
         <application
-            android:label="salamasphere_mobile"
+            android:label="SalamaSphere"
             android:name="${applicationName}"
             android:icon="@mipmap/ic_launcher"
             android:allowBackup="false"

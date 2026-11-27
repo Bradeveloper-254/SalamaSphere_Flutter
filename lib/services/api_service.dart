@@ -72,7 +72,7 @@ class ApiService {
 
     for (int attempt = 1; attempt <= 2; attempt++) {
       try {
-        debugPrint('SalamaSphere backend health check: attempt $attempt');
+        debugPrint('AI-GBVT backend health check: attempt $attempt');
 
         final response = await _client
             .get(healthUri, headers: {'Accept': 'application/json'})
@@ -84,7 +84,7 @@ class ApiService {
           if (decoded is Map &&
               decoded['status'] == 'healthy' &&
               decoded['database'] == 'connected') {
-            debugPrint('SalamaSphere backend is ready.');
+            debugPrint('AI-GBVT backend is ready.');
             return true;
           }
         }
@@ -130,7 +130,7 @@ class ApiService {
         'success': false,
         'status_code': null,
         'message':
-            'SalamaSphere services are taking longer than expected '
+            'AI-GBVT services are taking longer than expected '
             'to start. Please check your connection and try again.',
       };
     }
@@ -174,10 +174,7 @@ class ApiService {
         _token = token;
 
         try {
-          await _secureStorage.write(
-            key: 'salamasphere_api_token',
-            value: token,
-          );
+          await _secureStorage.write(key: 'salamasphere_api_token', value: token);
         } catch (_) {
           // Keep the in-memory token if secure storage is unavailable.
         }
@@ -205,13 +202,13 @@ class ApiService {
         'message': 'The login request timed out. Please try again.',
       };
     } catch (error) {
-      debugPrint('SalamaSphere login connection error: $error');
+      debugPrint('AI-GBVT login connection error: $error');
 
       return {
         'success': false,
         'status_code': null,
         'message':
-            'Could not connect to SalamaSphere. '
+            'Could not connect to AI-GBVT. '
             'Check your internet connection and try again. offline mode not yet fully implemented',
       };
     }
@@ -232,7 +229,7 @@ class ApiService {
     if (detail is String && detail.trim().isNotEmpty) return detail.trim();
 
     if (statusCode >= 500) {
-      return 'The SalamaSphere server is currently failing to process login '
+      return 'The AI-GBVT server is currently failing to process login '
           '(HTTP $statusCode). Please try again shortly or contact support.';
     }
 
@@ -379,7 +376,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere. Check your connection and try again.',
+        'message': 'Could not connect to AI-GBVT. Check your connection and try again.',
       };
     }
   }
@@ -979,7 +976,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere: $error',
+        'message': 'Could not connect to AI-GBVT: $error',
       };
     }
   }
@@ -1312,7 +1309,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere. Check your connection.',
+        'message': 'Could not connect to AI-GBVT. Check your connection.',
       };
     }
   }
@@ -1390,7 +1387,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere. Check your connection.',
+        'message': 'Could not connect to AI-GBVT. Check your connection.',
       };
     }
   }
@@ -1605,7 +1602,7 @@ class ApiService {
         'success': false,
         'status_code': null,
         'message':
-            'Could not connect to SalamaSphere. '
+            'Could not connect to AI-GBVT. '
             'Check your connection and try again.',
       };
     }
@@ -1681,7 +1678,7 @@ class ApiService {
         'success': false,
         'status_code': null,
         'message':
-            'Could not connect to SalamaSphere. '
+            'Could not connect to AI-GBVT. '
             'Check your connection and try again.',
       };
     }
@@ -1834,7 +1831,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere.',
+        'message': 'Could not connect to AI-GBVT.',
         'accounts': <Map<String, dynamic>>[],
       };
     }
@@ -1912,7 +1909,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere.',
+        'message': 'Could not connect to AI-GBVT.',
       };
     }
   }
@@ -1980,7 +1977,7 @@ class ApiService {
       return {
         'success': false,
         'status_code': null,
-        'message': 'Could not connect to SalamaSphere.',
+        'message': 'Could not connect to AI-GBVT.',
       };
     }
   }

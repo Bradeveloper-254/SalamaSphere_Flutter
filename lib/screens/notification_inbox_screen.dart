@@ -278,8 +278,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
                                   : Icons.notifications_active,
                             ),
                             title: Text(
-                              item['title']?.toString() ??
-                                  'SalamaSphere update',
+                              item['title']?.toString() ?? 'AI-GBVT update',
                               style: TextStyle(
                                 fontWeight: isRead
                                     ? FontWeight.normal

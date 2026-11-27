@@ -177,7 +177,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         message = accountCreated
             ? 'Your account was created, but the next step failed. '
                   'Please retry the verification upload or sign in again.'
-            : 'Could not connect to SalamaSphere. Please try again.';
+            : 'Could not connect to AI-GBVT. Please try again.';
       });
     }
   }
@@ -343,7 +343,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 12),
 
                   Text(
-                    'Join SalamaSphere',
+                    'Join AI-GBVT',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
@@ -351,7 +351,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 8),
 
                   const Text(
-                    'Create an account to access SalamaSphere services.',
+                    'Create an account to access AI-GBVT services.',
                     textAlign: TextAlign.center,
                   ),
 

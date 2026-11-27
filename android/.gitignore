@@ -8,12 +8,12 @@ GeneratedPluginRegistrant.java
 .cxx/
 
 # Remember to never publicly share your keystore.
-# See https://flutter.dev/to/reference-keystore
+# See https://flutter.dev/to/reference-keystore 
 key.properties
 **/*.keystore
 **/*.jks
 
-# SalamaSphere Android signing credentials
+# AI-GBVT Android signing credentials
 android/key.properties
 *.jks
-*.keystore
+*.keystore 

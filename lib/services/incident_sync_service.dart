@@ -118,7 +118,7 @@ class IncidentSyncService {
         final deviceIdentifier =
             incident['device_identifier']?.toString().trim() ?? '';
         if (deviceIdentifier.isEmpty ||
-            deviceIdentifier == 'SalamaSphere wearable') {
+            deviceIdentifier == 'AI-GBVT wearable') {
           throw StateError('The wearable device identifier is missing.');
         }
 
@@ -134,7 +134,7 @@ class IncidentSyncService {
                 'Authorization': 'Token $token',
               },
               body: jsonEncode({
-                'device_name': 'SalamaSphere wearable',
+                'device_name': 'AI-GBVT wearable',
                 'device_identifier': deviceIdentifier,
                 'firmware_version': 'unknown',
               }),

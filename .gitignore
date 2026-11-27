@@ -78,7 +78,7 @@ recordings/
 build/
 coverage/
 
-# SalamaSphere Android signing credentials
+# AI-GBVT Android signing credentials
 android/key.properties
 *.jks
 *.keystore

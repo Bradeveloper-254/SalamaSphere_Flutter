@@ -106,7 +106,7 @@ ${response['data'] ?? ''}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('SalamaSphere Backend Test')),
+      appBar: AppBar(title: const Text('AI-GBVT Backend Test')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -118,7 +118,7 @@ ${response['data'] ?? ''}
                 const Icon(Icons.security, size: 64),
                 const SizedBox(height: 16),
                 const Text(
-                  'Connect to SalamaSphere Django',
+                  'Connect to AI-GBVT Django',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),

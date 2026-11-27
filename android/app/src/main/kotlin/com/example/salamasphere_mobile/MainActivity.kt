@@ -1,4 +1,4 @@
-package com.example.salamasphere_mobile
+package com.example.ai_gbvt
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -17,7 +17,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.salamasphere/share")
             .setMethodCallHandler { call, result ->
             if (call.method == "shareIncident") {
-                val title = call.argument<String>("title") ?: "SalamaSphere incident"
+                val title = call.argument<String>("title") ?: "AI-GBVT incident"
                 val text = call.argument<String>("text") ?: title
                 val files = call.argument<List<Map<String, Any>>>("files") ?: emptyList()
                 try {
@@ -96,7 +96,7 @@ class MainActivity : FlutterActivity() {
             }
             if (call.method == "shareAudio" || call.method == "shareMedia" ||
                 call.method == "viewMedia") {
-                val title = call.argument<String>("title") ?: "SalamaSphere evidence"
+                val title = call.argument<String>("title") ?: "AI-GBVT evidence"
                 val fileName = call.argument<String>("fileName") ?: "salamasphere-evidence"
                 val mimeType = call.argument<String>("mimeType") ?: "application/octet-stream"
                 val bytes = call.argument<ByteArray>("bytes")
@@ -144,7 +144,7 @@ class MainActivity : FlutterActivity() {
                     return@setMethodCallHandler
                 }
                 val text = call.argument<String>("text") ?: ""
-                val title = call.argument<String>("title") ?: "SalamaSphere"
+                val title = call.argument<String>("title") ?: "AI-GBVT"
                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_SUBJECT, title)

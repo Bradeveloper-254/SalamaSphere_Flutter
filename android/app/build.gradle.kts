@@ -17,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 
 
 android {
-    namespace = "com.example.salamasphere_mobile"
+    namespace = "com.example.ai_gbvt"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -27,7 +27,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.salamasphere_mobile"
+        applicationId = "com.example.ai_gbvt"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

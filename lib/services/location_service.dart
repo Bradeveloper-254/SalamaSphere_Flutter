@@ -98,7 +98,9 @@ class LocationService {
 
   Stream<IncidentLocation> watchIncidentLocation() async* {
     if (!await ensureTrackingPermission()) {
-      throw StateError('Location permission or device location is unavailable.');
+      throw StateError(
+        'Location permission or device location is unavailable.',
+      );
     }
     final LocationSettings settings = Platform.isAndroid
         ? AndroidSettings(
@@ -106,7 +108,7 @@ class LocationService {
             distanceFilter: 25,
             intervalDuration: const Duration(seconds: 30),
             foregroundNotificationConfig: const ForegroundNotificationConfig(
-              notificationTitle: 'SalamaSphere SOS location sharing',
+              notificationTitle: 'AI-GBVT SOS location sharing',
               notificationText:
                   'Your location is being shared with authorized responders.',
               notificationChannelName: 'Active SOS location',
@@ -147,7 +149,8 @@ class LocationService {
       speedMps: position.speed.isFinite && position.speed >= 0
           ? position.speed
           : null,
-      bearingDegrees: position.heading.isFinite &&
+      bearingDegrees:
+          position.heading.isFinite &&
               position.heading >= 0 &&
               position.heading < 360
           ? position.heading

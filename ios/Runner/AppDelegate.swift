@@ -25,7 +25,7 @@ import UIKit
           result(FlutterError(code: "INVALID_INCIDENT", message: "Incident details are missing.", details: nil))
           return
         }
-        let title = args["title"] as? String ?? "SalamaSphere incident"
+        let title = args["title"] as? String ?? "AI-GBVT incident"
         let text = args["text"] as? String ?? title
         let attachments = args["files"] as? [[String: Any]] ?? []
         var urls: [URL] = []
@@ -35,7 +35,7 @@ import UIKit
                   let bytes = attachment["bytes"] as? FlutterStandardTypedData,
                   !bytes.data.isEmpty else {
               throw NSError(
-                domain: "SalamaSphereShare",
+                domain: "AI-GBVTShare",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "An incident attachment is invalid."]
               )
@@ -71,7 +71,7 @@ import UIKit
           return
         }
         let fileName = URL(
-          fileURLWithPath: args["fileName"] as? String ?? "salamasphere-evidence"
+          fileURLWithPath: args["fileName"] as? String ?? "AI-GBVT-evidence"
         ).lastPathComponent
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
@@ -89,7 +89,7 @@ import UIKit
           result(nil)
           return
         }
-        let text = args["text"] as? String ?? args["title"] as? String ?? "SalamaSphere evidence"
+        let text = args["text"] as? String ?? args["title"] as? String ?? "AI-GBVT evidence"
         let controller = UIActivityViewController(activityItems: [url, text], applicationActivities: nil)
         controller.popoverPresentationController?.sourceView = self?.window?.rootViewController?.view
         self?.window?.rootViewController?.present(controller, animated: true)
@@ -102,7 +102,7 @@ import UIKit
         result(FlutterMethodNotImplemented)
         return
       }
-      let title = args["title"] as? String ?? "SalamaSphere"
+      let title = args["title"] as? String ?? "AI-GBVT"
       let controller = UIActivityViewController(activityItems: [text], applicationActivities: nil)
       controller.popoverPresentationController?.sourceView = self?.window?.rootViewController?.view
       self?.window?.rootViewController?.present(controller, animated: true)

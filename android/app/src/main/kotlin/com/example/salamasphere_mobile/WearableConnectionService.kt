@@ -1,4 +1,4 @@
-package com.example.salamasphere_mobile
+package com.example.ai_gbvt
 
 import android.app.Notification
 import android.app.NotificationChannel

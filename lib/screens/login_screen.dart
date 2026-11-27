@@ -151,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _loadingMessage = 'Connecting to SalamaSphere services. Please wait...';
+      _loadingMessage = 'Connecting to AI-GBVT services. Please wait...';
     });
 
     try {
@@ -180,10 +180,10 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _isLoading = false;
         _loadingMessage = null;
-        _errorMessage = 'Unable to connect to SalamaSphere. Check your internet connection and try again.';
+        _errorMessage = 'Unable to connect to AI-GBVT. Check your internet connection and try again.';
       });
 
-      debugPrint('SalamaSphere login error: $error');
+      debugPrint('AI-GBVT login error: $error');
     }
   }
 
@@ -224,7 +224,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SalamaSphere'),
+        title: const Text('AI-GBVT'),
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
       ),

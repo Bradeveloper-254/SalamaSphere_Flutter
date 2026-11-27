@@ -33,7 +33,7 @@ class _SalamaSphereAppState extends State<SalamaSphereApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SalamaSphere',
+      title: 'AI-GBVT Mobile',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),

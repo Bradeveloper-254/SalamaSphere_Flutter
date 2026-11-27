@@ -270,7 +270,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       setState(() {
         _loading = false;
         _connected = false;
-        _message = 'Could not connect to the server. Check your connection.';
+        _message =
+            'Could not connect to the AI-GBVT server. Check your connection.';
       });
     }
   }
@@ -305,7 +306,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       ) {
         if (!mounted) return;
         final transferId = metadata['transfer_id']?.toString();
-        final isTransferStart = metadata.containsKey('total_chunks') &&
+        final isTransferStart =
+            metadata.containsKey('total_chunks') &&
             metadata.containsKey('crc32');
         final expected =
             metadata['size'] ??
@@ -474,7 +476,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Share location during this SOS?'),
           content: const Text(
-            'If you agree, SalamaSphere will collect and securely queue location updates for this incident while tracking is active. You can stop sharing at any time.',
+            'If you agree, AI-GBVT will collect and securely queue location updates for this incident while tracking is active. You can stop sharing at any time.',
           ),
           actions: [
             TextButton(
@@ -1851,10 +1853,10 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     try {
       await const MethodChannel('com.salamasphere/share')
           .invokeMethod<void>('shareMedia', {
-            'title': 'SalamaSphere evidence',
+            'title': 'AI-GBVT evidence',
             'fileName': fileName,
             'mimeType': mimeType,
-            'text': 'SalamaSphere shared evidence.$recipientText',
+            'text': 'AI-GBVT shared evidence.$recipientText',
             'bytes': Uint8List.fromList(bytes),
           });
     } on PlatformException catch (error) {
@@ -1868,8 +1870,8 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     try {
       await const MethodChannel('com.salamasphere/share')
           .invokeMethod<void>('shareMedia', {
-            'title': 'SalamaSphere incident recording $incidentId',
-            'fileName': 'salamasphere-$incidentId.wav',
+            'title': 'AI-GBVT incident recording $incidentId',
+            'fileName': 'aigbvt-$incidentId.wav',
             'mimeType': 'audio/wav',
             'bytes': Uint8List.fromList(bytes),
           });
@@ -1908,7 +1910,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     final location = mapUri?.toString() ?? 'Location unavailable';
     final description = _field(incident, ['description'], fallback: '');
     final text = StringBuffer(
-      'SalamaSphere incident\n'
+      'AI-GBVT incident\n'
       'ID: $id\n'
       'Threat: $threat\n'
       'Time: $occurred\n'
@@ -2010,7 +2012,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
       final bytes = await _localDatabase.getIncidentAudioBytes(clientEventId);
       if (bytes != null && bytes.isNotEmpty) {
         final fileName =
-            localAudio?['file_name']?.toString() ?? 'salamasphere-$id.wav';
+            localAudio?['file_name']?.toString() ?? 'aigbvt-$id.wav';
         mediaFiles.add({
           'fileName': fileName,
           'mimeType': localAudio?['mime_type']?.toString() ?? 'audio/wav',
@@ -2042,7 +2044,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
             ? 'aac'
             : 'wav';
         mediaFiles.add({
-          'fileName': 'salamasphere-$id.$extension',
+          'fileName': 'aigbvt-$id.$extension',
           'mimeType': mimeType,
           'bytes': Uint8List.fromList(audioBytes),
         });
@@ -2060,7 +2062,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
     try {
       await const MethodChannel('com.salamasphere/share')
           .invokeMethod<void>('shareIncident', {
-            'title': 'SalamaSphere incident $id',
+            'title': 'AI-GBVT incident $id',
             'text': text.toString(),
             'files': mediaFiles,
           });
@@ -2362,7 +2364,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
-                    'SalamaSphere Wearable',
+                    'AI-GBVT Wearable',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -3147,7 +3149,7 @@ class _VictimDashboardScreenState extends State<VictimDashboardScreen> {
   }
 
   static const List<String> _titles = [
-    'SalamaSphere',
+    'AI-GBVT',
     'My incidents',
     'Share evidence',
     'Notifications',

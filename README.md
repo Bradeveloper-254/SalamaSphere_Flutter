@@ -1,8 +1,8 @@
-# SalamaSphere Mobile
+# AI-GBVT
 
-Flutter Android client for SalamaSphere.
+Flutter Android client for AI-GBVT.
 
-The sketch in `wearable_firmware/salamasphere_wearable.ino` mirrors the canonical firmware in the SalamaSphere backend repository at `SalamaSphere_device/firmware/production/salamasphere_wearable.ino`. Keep both copies synchronized.
+The sketch in `wearable_firmware/salamasphere_wearable.ino` mirrors the canonical firmware in the AI-GBVT backend repository at `SalamaSphere_device/firmware/production/salamasphere_wearable.ino`. Keep both copies synchronized.
 
 ## Incident flow
 
