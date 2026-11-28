@@ -36,8 +36,8 @@ class TrustedContact {
     this.emailEnabled = false,
     this.active = true,
     this.consentConfirmed = false,
-    this.receiveVoiceCalls = false,
-    this.confirmVoiceConsent = false,
+    this.receiveVoiceCalls = true,
+    this.confirmVoiceConsent = true,
     this.voiceConsentConfirmedAt,
     this.voiceConsentWithdrawnAt,
   });
