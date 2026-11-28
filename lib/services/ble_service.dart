@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/wearable_event.dart';
 import 'audio_chunk_ack_tracker.dart';
@@ -131,6 +132,17 @@ class BleService {
   String get deviceIdentifier => _deviceIdentifier;
 
   Future<void> connectToWearable() async {
+    // Request runtime Bluetooth permissions on Android 12+.
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+    if (statuses[Permission.bluetoothScan]?.isGranted != true ||
+        statuses[Permission.bluetoothConnect]?.isGranted != true) {
+      throw StateError('Bluetooth permissions were not granted.');
+    }
+
     await disconnect();
 
     await FlutterBluePlus.adapterState
